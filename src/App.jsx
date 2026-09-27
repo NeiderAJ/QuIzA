@@ -3,6 +3,8 @@ import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from './supabaseClient'
 
 function App() {
+  const [authMode, setAuthMode] = useState('login')
+  const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
@@ -1445,6 +1447,58 @@ useEffect(() => {
 
 
 
+  async function handleSignUp(event) {
+    event.preventDefault()
+
+    const normalizedName = fullName.trim()
+    const normalizedEmail =
+      email.trim().toLowerCase()
+
+    if (!normalizedName) {
+      setMessage('Ingresa tu nombre.')
+      return
+    }
+
+    setMessage('Creando cuenta...')
+
+    const { data, error } =
+      await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: {
+          data: {
+            full_name: normalizedName,
+          },
+        },
+      })
+
+    if (error) {
+      setMessage(`Error: ${error.message}`)
+      return
+    }
+
+    setEmail(normalizedEmail)
+    setPassword('')
+
+    if (data.session && data.user) {
+      const loaded =
+        await loadProfile(data.user.id)
+
+      if (loaded) {
+        setFullName('')
+        setMessage('Cuenta creada correctamente ✅')
+      }
+
+      return
+    }
+
+    setFullName('')
+    setAuthMode('login')
+    setMessage(
+      'Cuenta creada. Revisa tu correo para confirmarla antes de iniciar sesión.'
+    )
+  }
+
   async function handleLogin(event) {
     event.preventDefault()
 
@@ -1521,6 +1575,8 @@ useEffect(() => {
 
     setEmail('')
     setPassword('')
+    setFullName('')
+    setAuthMode('login')
 
     setMessage('')
   }
@@ -2316,7 +2372,63 @@ function handleExitProjectionMode() {
     <main>
       <h1>QuIzA</h1>
 
-      <form onSubmit={handleLogin}>
+      <div>
+        <button
+          type="button"
+          onClick={() => {
+            setAuthMode('login')
+            setMessage('')
+          }}
+          disabled={authMode === 'login'}
+        >
+          Iniciar sesión
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setAuthMode('signup')
+            setMessage('')
+          }}
+          disabled={authMode === 'signup'}
+        >
+          Crear cuenta
+        </button>
+      </div>
+
+      <h2>
+        {authMode === 'login'
+          ? 'Iniciar sesión'
+          : 'Crear cuenta'}
+      </h2>
+
+      <form
+        onSubmit={
+          authMode === 'login'
+            ? handleLogin
+            : handleSignUp
+        }
+      >
+        {authMode === 'signup' && (
+          <div>
+            <label>
+              Nombre
+
+              <input
+                type="text"
+                value={fullName}
+                onChange={(event) =>
+                  setFullName(
+                    event.target.value
+                  )
+                }
+                autoComplete="name"
+                required
+              />
+            </label>
+          </div>
+        )}
+
         <div>
           <label>
             Correo
@@ -2329,6 +2441,7 @@ function handleExitProjectionMode() {
                   event.target.value
                 )
               }
+              autoComplete="email"
               required
             />
           </label>
@@ -2346,13 +2459,20 @@ function handleExitProjectionMode() {
                   event.target.value
                 )
               }
+              autoComplete={
+                authMode === 'login'
+                  ? 'current-password'
+                  : 'new-password'
+              }
               required
             />
           </label>
         </div>
 
         <button type="submit">
-          Ingresar
+          {authMode === 'login'
+            ? 'Ingresar'
+            : 'Crear cuenta'}
         </button>
       </form>
 
