@@ -1499,6 +1499,29 @@ useEffect(() => {
     )
   }
 
+  async function handleGoogleSignIn() {
+    const redirectUrl = new URL(
+      import.meta.env.BASE_URL,
+      window.location.origin
+    )
+
+    redirectUrl.search = window.location.search
+
+    setMessage('Redirigiendo a Google...')
+
+    const { error } =
+      await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl.toString(),
+        },
+      })
+
+    if (error) {
+      setMessage(`Error: ${error.message}`)
+    }
+  }
+
   async function handleLogin(event) {
     event.preventDefault()
 
@@ -2475,6 +2498,15 @@ function handleExitProjectionMode() {
             : 'Crear cuenta'}
         </button>
       </form>
+
+      <p>o</p>
+
+      <button
+        type="button"
+        onClick={handleGoogleSignIn}
+      >
+        Continuar con Google
+      </button>
 
       {message && (
         <p>{message}</p>
