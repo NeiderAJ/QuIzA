@@ -9,6 +9,7 @@ function App() {
   const [password, setPassword] = useState('')
 
   const [profile, setProfile] = useState(null)
+  const [authenticatedView, setAuthenticatedView] = useState('home')
 
   const [courses, setCourses] = useState([])
   const [selectedCourse, setSelectedCourse] = useState(null)
@@ -1600,6 +1601,7 @@ useEffect(() => {
     setPassword('')
     setFullName('')
     setAuthMode('login')
+    setAuthenticatedView('home')
 
     setMessage('')
   }
@@ -1783,10 +1785,151 @@ function handleExitProjectionMode() {
   )
 }
 
+    const hasPriorityQuizFlow =
+      joinToken ||
+      activeAttempt ||
+      currentQuestion ||
+      attemptResult ||
+      integrityAlert
+
+    if (
+      authenticatedView === 'home' &&
+      !hasPriorityQuizFlow
+    ) {
+      return (
+        <main>
+          <h1>QuIzA</h1>
+
+          <p
+            style={{
+              color: '#6b7280',
+              fontSize: '0.9rem',
+            }}
+          >
+            {profile.full_name} · {profile.email}
+          </p>
+
+          <button
+            type="button"
+            onClick={() =>
+              setMessage(
+                'El escáner interno aún está en desarrollo. Por ahora, abre el código QR con la cámara de tu dispositivo.'
+              )
+            }
+          >
+            Escanear QR
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setAuthenticatedView('panel-v1')
+              setMessage('')
+            }}
+          >
+            Crear evaluación
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              setMessage(
+                'La creación de encuestas rápidas aún está en desarrollo.'
+              )
+            }
+          >
+            Crear encuesta rápida
+          </button>
+
+          {message && (
+            <p>{message}</p>
+          )}
+
+          <button
+            type="button"
+            onClick={handleLogout}
+          >
+            Cerrar sesión
+          </button>
+        </main>
+      )
+    }
+
     return (
       <>
         <main>
           <h1>QuIzA</h1>
+
+          {!hasPriorityQuizFlow && (
+            <nav
+              aria-label="Navegación principal"
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                marginBottom: '1.5rem',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthenticatedView('home')
+                  setMessage(
+                    'El escáner interno aún está en desarrollo. Por ahora, abre el código QR con la cámara de tu dispositivo.'
+                  )
+                }}
+                style={{
+                  backgroundColor: '#e5e7eb',
+                  border: '1px solid #d1d5db',
+                  color: '#374151',
+                }}
+              >
+                Escanear QR
+              </button>
+
+              <button
+                type="button"
+                aria-current="page"
+                onClick={() => setMessage('')}
+                style={{
+                  backgroundColor: '#14532d',
+                  border: '1px solid #14532d',
+                  color: 'white',
+                }}
+              >
+                Crear evaluación
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthenticatedView('home')
+                  setMessage(
+                    'La creación de encuestas rápidas aún está en desarrollo.'
+                  )
+                }}
+                style={{
+                  backgroundColor: '#e5e7eb',
+                  border: '1px solid #d1d5db',
+                  color: '#374151',
+                }}
+              >
+                Crear encuesta rápida
+              </button>
+
+              <button
+                type="button"
+                onClick={handleLogout}
+                style={{
+                  backgroundColor: '#e5e7eb',
+                  border: '1px solid #d1d5db',
+                  color: '#374151',
+                }}
+              >
+                Cerrar sesión
+              </button>
+            </nav>
+          )}
 
           <h2>Sesión iniciada ✅</h2>
 
@@ -1798,13 +1941,6 @@ function handleExitProjectionMode() {
           <p>
             <strong>Correo:</strong>{' '}
             {profile.email}
-          </p>
-
-          <p>
-            <strong>Tipo:</strong>{' '}
-            {profile.is_teacher
-              ? 'Docente'
-              : 'Estudiante'}
           </p>
 
           <section>
