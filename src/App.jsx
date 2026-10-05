@@ -13,6 +13,8 @@ const deliveryModeLabels = {
   asynchronous: 'Virtual asincrónica',
 }
 
+const basicEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 function App() {
   const [authMode, setAuthMode] = useState('login')
   const [fullName, setFullName] = useState('')
@@ -30,6 +32,12 @@ function App() {
 
   const [courses, setCourses] = useState([])
   const [selectedCourse, setSelectedCourse] = useState(null)
+  const [authorizedEmails, setAuthorizedEmails] = useState([])
+  const [participantsInput, setParticipantsInput] = useState('')
+  const [participantsMessage, setParticipantsMessage] = useState('')
+  const [loadingAuthorizedEmails, setLoadingAuthorizedEmails] = useState(false)
+  const [addingAuthorizedEmails, setAddingAuthorizedEmails] = useState(false)
+  const [deletingAuthorizedEmailId, setDeletingAuthorizedEmailId] = useState(null)
 
   const [quizzes, setQuizzes] = useState([])
   const [selectedQuiz, setSelectedQuiz] = useState(null)
@@ -87,6 +95,10 @@ function App() {
 
   const oneMinuteWarningShownRef = useRef(false)
   const tenSecondsWarningShownRef = useRef(false)
+  const selectedCourseIdRef = useRef(null)
+  const authorizedEmailsLoadIdRef = useRef(0)
+
+  selectedCourseIdRef.current = selectedCourse?.id ?? null
 
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
@@ -134,6 +146,28 @@ function App() {
 
     restoreSession()
   }, [])
+
+  useEffect(() => {
+    authorizedEmailsLoadIdRef.current += 1
+    setAuthorizedEmails([])
+    setParticipantsInput('')
+    setParticipantsMessage('')
+    setLoadingAuthorizedEmails(false)
+
+    if (
+      !selectedCourse ||
+      !profile ||
+      selectedCourse.teacher_id !== profile.id
+    ) {
+      return
+    }
+
+    loadAuthorizedEmails(selectedCourse.id)
+  }, [
+    selectedCourse?.id,
+    selectedCourse?.teacher_id,
+    profile?.id,
+  ])
 
   /*
    * ============================================================
@@ -504,6 +538,189 @@ useEffect(() => {
     setCourses(data ?? [])
 
     return true
+  }
+
+  async function loadAuthorizedEmails(courseId) {
+    if (selectedCourseIdRef.current !== courseId) {
+      return false
+    }
+
+    const loadId =
+      authorizedEmailsLoadIdRef.current + 1
+
+    authorizedEmailsLoadIdRef.current = loadId
+    setLoadingAuthorizedEmails(true)
+
+    const { data, error } = await supabase
+      .from('course_authorized_emails')
+      .select('id, email, created_at')
+      .eq('course_id', courseId)
+      .order('email')
+
+    if (
+      loadId !== authorizedEmailsLoadIdRef.current ||
+      selectedCourseIdRef.current !== courseId
+    ) {
+      return false
+    }
+
+    setLoadingAuthorizedEmails(false)
+
+    if (error) {
+      setParticipantsMessage(
+        `Error cargando participantes autorizados: ${error.message}`
+      )
+      return false
+    }
+
+    setAuthorizedEmails(data ?? [])
+
+    return true
+  }
+
+  async function handleAddAuthorizedEmails() {
+    if (
+      !selectedCourse ||
+      selectedCourse.teacher_id !== profile?.id
+    ) {
+      setParticipantsMessage(
+        'No tienes permiso para administrar los participantes de este grupo.'
+      )
+      return
+    }
+
+    const entries = participantsInput
+      .split(/[,\n]+/)
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean)
+
+    if (entries.length === 0) {
+      setParticipantsMessage(
+        'Pega al menos un correo para agregar participantes.'
+      )
+      return
+    }
+
+    const existingEmails = new Set(
+      authorizedEmails.map(({ email }) => email)
+    )
+    const inputEmails = new Set()
+    const newEmails = []
+    let duplicateCount = 0
+    let invalidCount = 0
+
+    entries.forEach((entry) => {
+      if (!basicEmailPattern.test(entry)) {
+        invalidCount += 1
+        return
+      }
+
+      if (
+        inputEmails.has(entry) ||
+        existingEmails.has(entry)
+      ) {
+        duplicateCount += 1
+        return
+      }
+
+      inputEmails.add(entry)
+      newEmails.push(entry)
+    })
+
+    const summary = [
+      `${newEmails.length} ${newEmails.length === 1 ? 'agregado' : 'agregados'}`,
+      `${duplicateCount} ${duplicateCount === 1 ? 'duplicado ignorado' : 'duplicados ignorados'}`,
+      `${invalidCount} ${invalidCount === 1 ? 'inválido' : 'inválidos'}`,
+    ].join(' · ')
+
+    setAddingAuthorizedEmails(true)
+    setParticipantsMessage('')
+
+    if (newEmails.length > 0) {
+      const { error } = await supabase
+        .from('course_authorized_emails')
+        .insert(
+          newEmails.map((authorizedEmail) => ({
+            course_id: selectedCourse.id,
+            email: authorizedEmail,
+          }))
+        )
+
+      if (
+        selectedCourseIdRef.current !== selectedCourse.id
+      ) {
+        setAddingAuthorizedEmails(false)
+        return
+      }
+
+      if (error) {
+        setParticipantsMessage(
+          `Error agregando participantes: ${error.message}`
+        )
+        setAddingAuthorizedEmails(false)
+        return
+      }
+    }
+
+    const reloaded = await loadAuthorizedEmails(
+      selectedCourse.id
+    )
+
+    setParticipantsInput('')
+    setAddingAuthorizedEmails(false)
+
+    if (reloaded) {
+      setParticipantsMessage(summary)
+    }
+  }
+
+  async function handleDeleteAuthorizedEmail(
+    authorizedEmail
+  ) {
+    if (
+      !selectedCourse ||
+      selectedCourse.teacher_id !== profile?.id
+    ) {
+      setParticipantsMessage(
+        'No tienes permiso para administrar los participantes de este grupo.'
+      )
+      return
+    }
+
+    setDeletingAuthorizedEmailId(authorizedEmail.id)
+    setParticipantsMessage('')
+
+    const { error } = await supabase
+      .from('course_authorized_emails')
+      .delete()
+      .eq('id', authorizedEmail.id)
+
+    if (
+      selectedCourseIdRef.current !== selectedCourse.id
+    ) {
+      setDeletingAuthorizedEmailId(null)
+      return
+    }
+
+    if (error) {
+      setParticipantsMessage(
+        `Error eliminando participante: ${error.message}`
+      )
+      setDeletingAuthorizedEmailId(null)
+      return
+    }
+
+    const reloaded = await loadAuthorizedEmails(
+      selectedCourse.id
+    )
+
+    setDeletingAuthorizedEmailId(null)
+
+    if (reloaded) {
+      setParticipantsMessage(
+        `${authorizedEmail.email} eliminado de participantes.`
+      )
+    }
   }
 
   async function loadQuizzes(courseId) {
@@ -1499,12 +1716,28 @@ useEffect(() => {
     setPassword('')
 
     if (data.session && data.user) {
+      const params =
+        new URLSearchParams(
+          window.location.search
+        )
+
+      const token = params.get('join')
+
+      if (token) {
+        setJoinToken(token)
+      }
+
       const loaded =
         await loadProfile(data.user.id)
 
       if (loaded) {
         setFullName('')
-        setMessage('Cuenta creada correctamente ✅')
+
+        if (token) {
+          await joinQuizSession(token)
+        } else {
+          setMessage('Cuenta creada correctamente ✅')
+        }
       }
 
       return
@@ -1912,6 +2145,10 @@ function renderAuthenticatedHeader() {
   }
 
   if (profile) {
+    const isSelectedCourseOwner =
+      Boolean(selectedCourse) &&
+      selectedCourse?.teacher_id === profile.id
+
     const isSelectedEvaluationOwner =
       Boolean(selectedQuiz) &&
       selectedCourse?.teacher_id === profile.id
@@ -2365,6 +2602,104 @@ function renderAuthenticatedHeader() {
                   )}
                 </section>
               </div>
+
+              {selectedCourse &&
+                isSelectedCourseOwner && (
+                  <section
+                    className="participants-section"
+                    aria-labelledby="participants-heading"
+                  >
+                    <h2 id="participants-heading">
+                      Participantes
+                    </h2>
+
+                    <p className="participants-count">
+                      {authorizedEmails.length}{' '}
+                      {authorizedEmails.length === 1
+                        ? 'correo autorizado'
+                        : 'correos autorizados'}
+                    </p>
+
+                    <label className="participants-input">
+                      <span>
+                        Correos separados por coma o salto de línea
+                      </span>
+
+                      <textarea
+                        value={participantsInput}
+                        onChange={(event) =>
+                          setParticipantsInput(event.target.value)
+                        }
+                        rows="5"
+                        placeholder="ana@ejemplo.com&#10;luis@ejemplo.com"
+                        disabled={
+                          addingAuthorizedEmails ||
+                          deletingAuthorizedEmailId !== null
+                        }
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={handleAddAuthorizedEmails}
+                      disabled={
+                        addingAuthorizedEmails ||
+                        loadingAuthorizedEmails ||
+                        deletingAuthorizedEmailId !== null
+                      }
+                    >
+                      {addingAuthorizedEmails
+                        ? 'Agregando...'
+                        : 'Agregar participantes'}
+                    </button>
+
+                    {participantsMessage && (
+                      <p
+                        className="participants-message"
+                        role="status"
+                      >
+                        {participantsMessage}
+                      </p>
+                    )}
+
+                    {loadingAuthorizedEmails ? (
+                      <p className="empty-state">
+                        Cargando participantes...
+                      </p>
+                    ) : authorizedEmails.length === 0 ? (
+                      <p className="empty-state">
+                        No hay correos autorizados todavía.
+                      </p>
+                    ) : (
+                      <ul className="participants-list">
+                        {authorizedEmails.map((authorizedEmail) => (
+                          <li key={authorizedEmail.id}>
+                            <span>{authorizedEmail.email}</span>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDeleteAuthorizedEmail(
+                                  authorizedEmail
+                                )
+                              }
+                              disabled={
+                                addingAuthorizedEmails ||
+                                loadingAuthorizedEmails ||
+                                deletingAuthorizedEmailId !== null
+                              }
+                            >
+                              {deletingAuthorizedEmailId ===
+                              authorizedEmail.id
+                                ? 'Eliminando...'
+                                : 'Eliminar'}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                )}
             </>
           )}
 
