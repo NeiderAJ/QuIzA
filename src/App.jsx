@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from './supabaseClient'
 
+const evaluationStatusLabels = {
+  draft: 'Borrador',
+  published: 'Publicada',
+  closed: 'Cerrada',
+}
+
+const deliveryModeLabels = {
+  in_person: 'Presencial',
+  asynchronous: 'Virtual asincrónica',
+}
+
 function App() {
   const [authMode, setAuthMode] = useState('login')
   const [fullName, setFullName] = useState('')
@@ -9,7 +20,13 @@ function App() {
   const [password, setPassword] = useState('')
 
   const [profile, setProfile] = useState(null)
-  const [authenticatedView, setAuthenticatedView] = useState('home')
+  const [authenticatedView, setAuthenticatedView] = useState('panel-v1')
+
+  const [evaluationTitle, setEvaluationTitle] = useState('')
+  const [evaluationDuration, setEvaluationDuration] = useState('')
+  const [evaluationGroup, setEvaluationGroup] = useState('')
+  const [evaluationInstructions, setEvaluationInstructions] = useState('')
+  const [creatingEvaluation, setCreatingEvaluation] = useState(false)
 
   const [courses, setCourses] = useState([])
   const [selectedCourse, setSelectedCourse] = useState(null)
@@ -515,7 +532,7 @@ useEffect(() => {
 
     if (error) {
       setMessage(
-        `Error cargando quizzes: ${error.message}`
+        `Error cargando evaluaciones: ${error.message}`
       )
       return false
     }
@@ -549,7 +566,7 @@ useEffect(() => {
 
     if (error) {
       setMessage(
-        `Error cargando información del quiz: ${error.message}`
+        `Error cargando información de la evaluación: ${error.message}`
       )
       return null
     }
@@ -572,7 +589,7 @@ async function loadAttemptDeadline(attemptId) {
 
   if (error) {
     setMessage(
-      `Error cargando el tiempo del quiz: ${error.message}`
+      `Error cargando el tiempo de la evaluación: ${error.message}`
     )
     return null
   }
@@ -763,7 +780,7 @@ async function restoreStoredAttempt() {
 
     if (error) {
       setMessage(
-        `Error ingresando al quiz: ${error.message}`
+        `Error ingresando a la evaluación: ${error.message}`
       )
       return false
     }
@@ -820,7 +837,7 @@ async function restoreStoredAttempt() {
       return false
     }
 
-    setMessage('Acceso al quiz autorizado ✅')
+    setMessage('Acceso a la evaluación autorizado ✅')
 
     return true
   }
@@ -831,7 +848,7 @@ async function restoreStoredAttempt() {
     return
   }
 
-  setMessage('Iniciando quiz virtual...')
+  setMessage('Iniciando evaluación virtual...')
 
   const { data, error } = await supabase.rpc(
     'start_async_quiz_attempt',
@@ -842,7 +859,7 @@ async function restoreStoredAttempt() {
 
   if (error) {
     setMessage(
-      `Error iniciando el quiz: ${error.message}`
+      `Error iniciando la evaluación: ${error.message}`
     )
     return
   }
@@ -892,7 +909,7 @@ async function restoreStoredAttempt() {
     return
   }
 
-  setMessage('Quiz virtual iniciado ✅')
+  setMessage('Evaluación virtual iniciada ✅')
 }
 
 
@@ -938,7 +955,7 @@ if (!question) {
     })
 
     setMessage(
-      'El tiempo disponible para este quiz terminó.'
+      'El tiempo disponible para esta evaluación terminó.'
     )
 
     return false
@@ -1019,7 +1036,7 @@ if (!question) {
             setIntegrityAlert(null)
 
             setMessage(
-              'El tiempo disponible para este quiz terminó.'
+              'El tiempo disponible para esta evaluación terminó.'
             )
 
             return true
@@ -1184,7 +1201,7 @@ if (!question) {
   })
 
   setMessage(
-    'El tiempo disponible para este quiz terminó.'
+    'El tiempo disponible para esta evaluación terminó.'
   )
 
   setSubmittingAnswer(false)
@@ -1235,7 +1252,7 @@ if (!question) {
 
     if (submitError) {
       setMessage(
-        `Respuesta guardada, pero hubo un error cerrando el quiz: ${submitError.message}`
+        `Respuesta guardada, pero hubo un error cerrando la evaluación: ${submitError.message}`
       )
 
       setSubmittingAnswer(false)
@@ -1267,7 +1284,7 @@ if (!question) {
 
     if (finalAttemptError) {
       setMessage(
-        `Quiz entregado, pero no fue posible leer el resultado: ${finalAttemptError.message}`
+        `Evaluación entregada, pero no fue posible leer el resultado: ${finalAttemptError.message}`
       )
 
       setSubmittingAnswer(false)
@@ -1292,11 +1309,11 @@ if (!question) {
       finalAttempt.status === 'graded'
     ) {
       setMessage(
-        'Quiz finalizado y calificado ✅'
+        'Evaluación finalizada y calificada ✅'
       )
     } else {
       setMessage(
-        'Quiz entregado ✅ Algunas respuestas están pendientes de calificación.'
+        'Evaluación entregada ✅ Algunas respuestas están pendientes de calificación.'
       )
     }
 
@@ -1362,7 +1379,7 @@ async function refreshAttemptStatus(attemptId) {
     })
 
     setMessage(
-      'El tiempo disponible para este quiz terminó.'
+      'El tiempo disponible para esta evaluación terminó.'
     )
 
       clearStoredAttempt()
@@ -1601,7 +1618,7 @@ useEffect(() => {
     setPassword('')
     setFullName('')
     setAuthMode('login')
-    setAuthenticatedView('home')
+    setAuthenticatedView('panel-v1')
 
     setMessage('')
   }
@@ -1610,6 +1627,160 @@ useEffect(() => {
     setSelectedCourse(course)
 
     await loadQuizzes(course.id)
+  }
+
+  async function findOwnedCourseByNickname(userId, nickname) {
+    const { data, error } = await supabase
+      .from('courses')
+      .select(
+        'id, nickname, name, code, group_name, academic_period, teacher_id'
+      )
+      .eq('teacher_id', userId)
+
+    if (error) {
+      throw error
+    }
+
+    const normalizedNickname = nickname.toLowerCase()
+
+    return (data ?? []).find(
+      (course) =>
+        course.nickname.trim().toLowerCase() ===
+        normalizedNickname
+    ) ?? null
+  }
+
+  async function handleCreateEvaluation(event) {
+    event.preventDefault()
+
+    const title = evaluationTitle.trim()
+    const groupName = evaluationGroup
+      .trim()
+      .replace(/\s+/g, ' ')
+    const durationMinutes = Number(evaluationDuration)
+    const instructions = evaluationInstructions.trim()
+
+    if (!title || !groupName) {
+      setMessage(
+        'Completa el título y el nombre del grupo.'
+      )
+      return
+    }
+
+    if (
+      !Number.isInteger(durationMinutes) ||
+      durationMinutes <= 0
+    ) {
+      setMessage(
+        'La duración debe ser un número entero mayor que cero.'
+      )
+      return
+    }
+
+    setCreatingEvaluation(true)
+    setMessage('Creando evaluación...')
+
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser()
+
+      if (userError || !user) {
+        throw userError ?? new Error(
+          'No fue posible verificar la sesión autenticada.'
+        )
+      }
+
+      let course = await findOwnedCourseByNickname(
+        user.id,
+        groupName
+      )
+
+      if (!course) {
+        const { data, error } = await supabase
+          .from('courses')
+          .insert({
+            teacher_id: user.id,
+            name: groupName,
+            nickname: groupName,
+          })
+          .select(
+            'id, nickname, name, code, group_name, academic_period, teacher_id'
+          )
+          .single()
+
+        if (error?.code === '23505') {
+          course = await findOwnedCourseByNickname(
+            user.id,
+            groupName
+          )
+        } else if (error) {
+          throw error
+        } else {
+          course = data
+        }
+      }
+
+      if (!course) {
+        throw new Error(
+          'No fue posible crear o recuperar el grupo.'
+        )
+      }
+
+      const { data: quiz, error: quizError } = await supabase
+        .from('quizzes')
+        .insert({
+          course_id: course.id,
+          created_by: user.id,
+          title,
+          instructions: instructions || null,
+          duration_minutes: durationMinutes,
+          delivery_mode: 'in_person',
+          status: 'draft',
+        })
+        .select(`
+          id,
+          title,
+          instructions,
+          status,
+          delivery_mode,
+          opens_at,
+          closes_at,
+          duration_minutes,
+          grade_scale_max,
+          number_of_slots,
+          variants_per_slot,
+          max_focus_violations
+        `)
+        .single()
+
+      if (quizError) {
+        throw quizError
+      }
+
+      await loadCourses()
+      await loadQuizzes(course.id)
+
+      setSelectedCourse(course)
+      setSelectedQuiz(quiz)
+      setAuthenticatedView('panel-v1')
+
+      setEvaluationTitle('')
+      setEvaluationDuration('')
+      setEvaluationGroup('')
+      setEvaluationInstructions('')
+
+      setMessage(
+        `Evaluación “${quiz.title}” creada en borrador ✅`
+      )
+    } catch (error) {
+      setMessage(
+        `Error creando evaluación: ${error.message}`
+      )
+    } finally {
+      setCreatingEvaluation(false)
+    }
   }
 
   function handleQuizSelect(quiz) {
@@ -1671,7 +1842,7 @@ useEffect(() => {
     return
   }
 
-  setMessage('Cerrando acceso al quiz...')
+  setMessage('Cerrando acceso a la evaluación...')
 
   const { data, error } = await supabase.rpc(
     'close_quiz_session',
@@ -1695,7 +1866,7 @@ useEffect(() => {
   }
 
   setQuizSession(null)
-  setMessage('Acceso al quiz cerrado ✅')
+  setMessage('Acceso a la evaluación cerrado ✅')
 }
 
 function handleEnterProjectionMode() {
@@ -1708,6 +1879,32 @@ function handleEnterProjectionMode() {
 
 function handleExitProjectionMode() {
   setProjectionMode(false)
+}
+
+function renderAuthenticatedHeader() {
+  return (
+    <header className="authenticated-header">
+      <h1>QuIzA</h1>
+
+      <details className="user-menu">
+        <summary>
+          <span>{profile.full_name}</span>
+          <span aria-hidden="true">▾</span>
+        </summary>
+
+        <div className="user-menu-panel">
+          <p>{profile.email}</p>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+          >
+            Cerrar sesión
+          </button>
+        </div>
+      </details>
+    </header>
+  )
 }
 
   if (loading) {
@@ -1741,7 +1938,7 @@ function handleExitProjectionMode() {
           fontSize: '1.4rem',
         }}
       >
-        Quiz: <strong>{selectedQuiz?.title}</strong>
+        Evaluación: <strong>{selectedQuiz?.title}</strong>
       </p>
 
       <QRCodeSVG
@@ -1798,59 +1995,165 @@ function handleExitProjectionMode() {
     ) {
       return (
         <main>
-          <h1>QuIzA</h1>
+          {renderAuthenticatedHeader()}
 
-          <p
-            style={{
-              color: '#6b7280',
-              fontSize: '0.9rem',
-            }}
+          <nav
+            className="primary-actions"
+            aria-label="Acciones principales"
           >
-            {profile.full_name} · {profile.email}
-          </p>
+            <button
+              type="button"
+              onClick={() =>
+                setMessage(
+                  'El escáner interno aún está en desarrollo. Por ahora, abre el código QR con la cámara de tu dispositivo.'
+                )
+              }
+            >
+              Escanear QR
+            </button>
 
-          <button
-            type="button"
-            onClick={() =>
-              setMessage(
-                'El escáner interno aún está en desarrollo. Por ahora, abre el código QR con la cámara de tu dispositivo.'
-              )
-            }
-          >
-            Escanear QR
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthenticatedView('create-evaluation')
+                setMessage('')
+              }}
+            >
+              Crear evaluación
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setAuthenticatedView('panel-v1')
-              setMessage('')
-            }}
-          >
-            Crear evaluación
-          </button>
-
-          <button
-            type="button"
-            onClick={() =>
-              setMessage(
-                'La creación de encuestas rápidas aún está en desarrollo.'
-              )
-            }
-          >
-            Crear encuesta rápida
-          </button>
+            <button
+              type="button"
+              onClick={() =>
+                setMessage(
+                  'La creación de encuestas rápidas aún está en desarrollo.'
+                )
+              }
+            >
+              Crear encuesta rápida
+            </button>
+          </nav>
 
           {message && (
             <p>{message}</p>
           )}
+        </main>
+      )
+    }
 
-          <button
-            type="button"
-            onClick={handleLogout}
+    if (
+      authenticatedView === 'create-evaluation' &&
+      !hasPriorityQuizFlow
+    ) {
+      return (
+        <main>
+          {renderAuthenticatedHeader()}
+
+          <form
+            onSubmit={handleCreateEvaluation}
+            style={{ marginTop: '24px' }}
           >
-            Cerrar sesión
-          </button>
+            <h2>Crear evaluación</h2>
+
+            <div>
+              <label>
+                Título de la evaluación
+                <input
+                  type="text"
+                  value={evaluationTitle}
+                  onChange={(event) =>
+                    setEvaluationTitle(event.target.value)
+                  }
+                  required
+                  disabled={creatingEvaluation}
+                />
+              </label>
+            </div>
+
+            <div>
+              <label>
+                Duración en minutos
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={evaluationDuration}
+                  onChange={(event) =>
+                    setEvaluationDuration(event.target.value)
+                  }
+                  required
+                  disabled={creatingEvaluation}
+                />
+              </label>
+            </div>
+
+            <div>
+              <label>
+                Nombre del grupo
+                <input
+                  type="text"
+                  value={evaluationGroup}
+                  onChange={(event) =>
+                    setEvaluationGroup(event.target.value)
+                  }
+                  required
+                  disabled={creatingEvaluation}
+                />
+              </label>
+            </div>
+
+            <div>
+              <label>
+                Instrucciones (opcional)
+                <textarea
+                  value={evaluationInstructions}
+                  onChange={(event) =>
+                    setEvaluationInstructions(event.target.value)
+                  }
+                  rows="4"
+                  disabled={creatingEvaluation}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    border: '1px solid #cfd6cd',
+                    borderRadius: '9px',
+                    resize: 'vertical',
+                  }}
+                />
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              disabled={creatingEvaluation}
+            >
+              {creatingEvaluation
+                ? 'Creando...'
+                : 'Crear evaluación'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAuthenticatedView('panel-v1')
+                setMessage('')
+              }}
+              disabled={creatingEvaluation}
+              style={{
+                width: '100%',
+                marginTop: '10px',
+                backgroundColor: '#fff',
+                borderColor: '#b8c9b4',
+                color: '#2e6b24',
+              }}
+            >
+              Cancelar
+            </button>
+
+            {message && (
+              <p role="status">{message}</p>
+            )}
+          </form>
         </main>
       )
     }
@@ -1858,238 +2161,207 @@ function handleExitProjectionMode() {
     return (
       <>
         <main>
-          <h1>QuIzA</h1>
+          {renderAuthenticatedHeader()}
 
           {!hasPriorityQuizFlow && (
-            <nav
-              aria-label="Navegación principal"
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: '0.5rem',
-                marginBottom: '1.5rem',
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthenticatedView('home')
-                  setMessage(
-                    'El escáner interno aún está en desarrollo. Por ahora, abre el código QR con la cámara de tu dispositivo.'
-                  )
-                }}
-                style={{
-                  backgroundColor: '#e5e7eb',
-                  border: '1px solid #d1d5db',
-                  color: '#374151',
-                }}
-              >
-                Escanear QR
-              </button>
-
-              <button
-                type="button"
-                aria-current="page"
-                onClick={() => setMessage('')}
-                style={{
-                  backgroundColor: '#14532d',
-                  border: '1px solid #14532d',
-                  color: 'white',
-                }}
-              >
-                Crear evaluación
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthenticatedView('home')
-                  setMessage(
-                    'La creación de encuestas rápidas aún está en desarrollo.'
-                  )
-                }}
-                style={{
-                  backgroundColor: '#e5e7eb',
-                  border: '1px solid #d1d5db',
-                  color: '#374151',
-                }}
-              >
-                Crear encuesta rápida
-              </button>
-
-              <button
-                type="button"
-                onClick={handleLogout}
-                style={{
-                  backgroundColor: '#e5e7eb',
-                  border: '1px solid #d1d5db',
-                  color: '#374151',
-                }}
-              >
-                Cerrar sesión
-              </button>
-            </nav>
-          )}
-
-          <h2>Sesión iniciada ✅</h2>
-
-          <p>
-            <strong>Usuario:</strong>{' '}
-            {profile.full_name}
-          </p>
-
-          <p>
-            <strong>Correo:</strong>{' '}
-            {profile.email}
-          </p>
-
-          <section>
-            <h2>Mis cursos</h2>
-
-            {courses.length === 0 ? (
-              <p>
-                No tienes cursos disponibles.
-              </p>
-            ) : (
-              <ul>
-                {courses.map((course) => (
-                  <li key={course.id}>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCourseSelect(course)
-                      }
-                    >
-                    <strong>{course.nickname}</strong>
-
-                    <br />
-
-                    <small>
-                      {course.name} — {course.academic_period}
-                    </small>
-                  </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          {selectedCourse && (
             <>
-             <section>
-              <h2>Grupo seleccionado</h2>
+              <nav
+                className="primary-actions"
+                aria-label="Acciones principales"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthenticatedView('panel-v1')
+                    setMessage(
+                      'El escáner interno aún está en desarrollo. Por ahora, abre el código QR con la cámara de tu dispositivo.'
+                    )
+                  }}
+                >
+                  Escanear QR
+                </button>
 
-              <p>
-                <strong>{selectedCourse.nickname}</strong>
-              </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthenticatedView('create-evaluation')
+                    setMessage('')
+                  }}
+                >
+                  Crear evaluación
+                </button>
 
-              <p>
-                {selectedCourse.name} — {selectedCourse.academic_period}
-              </p>
-            </section>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthenticatedView('panel-v1')
+                    setMessage(
+                      'La creación de encuestas rápidas aún está en desarrollo.'
+                    )
+                  }}
+                >
+                  Crear encuesta rápida
+                </button>
+              </nav>
 
-              <section>
-                <h2>Quizzes</h2>
+              <div className="dashboard-grid">
+                <section className="dashboard-column">
+                  <h2>Mis grupos</h2>
 
-                {quizzes.length === 0 ? (
-                  <p>
-                    No hay quizzes disponibles.
-                  </p>
-                ) : (
-                  <ul>
-                    {quizzes.map((quiz) => (
-                      <li key={quiz.id}>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleQuizSelect(
-                              quiz
-                            )
-                          }
-                        >
-                          <strong>
-                            {quiz.title}
-                          </strong>
+                  {courses.length === 0 ? (
+                    <p className="empty-state">
+                      No tienes grupos disponibles.
+                    </p>
+                  ) : (
+                    <ul className="selection-list">
+                      {courses.map((course) => {
+                        const isSelected =
+                          selectedCourse?.id === course.id
+                        const namesAreEqual =
+                          course.name.trim().toLowerCase() ===
+                          course.nickname.trim().toLowerCase()
 
-                          {' — '}
-                          {quiz.status}
+                        return (
+                          <li key={course.id}>
+                            <button
+                              type="button"
+                              className={
+                                isSelected ? 'is-selected' : ''
+                              }
+                              aria-pressed={isSelected}
+                              onClick={() =>
+                                handleCourseSelect(course)
+                              }
+                            >
+                              <strong>{course.name}</strong>
 
-                          {' — '}
-                          {
-                            quiz.duration_minutes
-                          }{' '}
-                          min
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
+                              {!namesAreEqual && (
+                                <small>{course.nickname}</small>
+                              )}
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="dashboard-column">
+                  <h2>Evaluaciones</h2>
+
+                  {!selectedCourse ? (
+                    <p className="empty-state">
+                      Selecciona un grupo para ver sus evaluaciones.
+                    </p>
+                  ) : quizzes.length === 0 ? (
+                    <p className="empty-state">
+                      No hay evaluaciones disponibles.
+                    </p>
+                  ) : (
+                    <ul className="selection-list">
+                      {quizzes.map((quiz) => {
+                        const isSelected =
+                          selectedQuiz?.id === quiz.id
+
+                        return (
+                          <li key={quiz.id}>
+                            <button
+                              type="button"
+                              className={
+                                isSelected ? 'is-selected' : ''
+                              }
+                              aria-pressed={isSelected}
+                              onClick={() =>
+                                handleQuizSelect(quiz)
+                              }
+                            >
+                              <strong>{quiz.title}</strong>
+
+                              <small>
+                                {evaluationStatusLabels[quiz.status] ??
+                                  'Estado no disponible'}
+                                {' · '}
+                                {quiz.duration_minutes} min
+                              </small>
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="dashboard-column evaluation-detail">
+                  {selectedQuiz ? (
+                    <>
+                      <h2>{selectedQuiz.title}</h2>
+
+                      <div className="evaluation-facts">
+                        <p>
+                          {evaluationStatusLabels[selectedQuiz.status] ??
+                            'Estado no disponible'}
+                        </p>
+
+                        <p>
+                          {deliveryModeLabels[
+                            selectedQuiz.delivery_mode
+                          ] ?? 'Modalidad no disponible'}
+                        </p>
+
+                        <p>
+                          {selectedQuiz.duration_minutes
+                            ? `${selectedQuiz.duration_minutes} minutos`
+                            : 'Duración no definida'}
+                        </p>
+
+                        <p>
+                          {selectedQuiz.number_of_slots ?? 0}{' '}
+                          {selectedQuiz.number_of_slots === 1
+                            ? 'pregunta'
+                            : 'preguntas'}
+                        </p>
+                      </div>
+
+                      {selectedQuiz.instructions && (
+                        <p className="evaluation-instructions">
+                          {selectedQuiz.instructions}
+                        </p>
+                      )}
+
+                      {profile.is_teacher &&
+                        selectedQuiz.delivery_mode === 'in_person' && (
+                          <button
+                            type="button"
+                            onClick={handleCreateQuizSession}
+                          >
+                            {quizSession
+                              ? 'Regenerar QR de acceso'
+                              : 'Abrir acceso por QR'}
+                          </button>
+                        )}
+
+                      {!profile.is_teacher &&
+                        selectedQuiz.delivery_mode === 'asynchronous' &&
+                        !activeAttempt && (
+                          <button
+                            type="button"
+                            onClick={handleStartAsyncQuiz}
+                          >
+                            Comenzar evaluación
+                          </button>
+                        )}
+                    </>
+                  ) : (
+                    <>
+                      <h2>Selecciona una evaluación</h2>
+                      <p className="empty-state">
+                        Aquí verás su información principal.
+                      </p>
+                    </>
+                  )}
+                </section>
+              </div>
             </>
-          )}
-
-          {selectedQuiz && (
-            <section>
-              <h2>
-                Quiz seleccionado
-              </h2>
-
-              <p>
-                <strong>
-                  {selectedQuiz.title}
-                </strong>
-              </p>
-
-              <p>
-                Modalidad:{' '}
-                <strong>
-                  {selectedQuiz.delivery_mode === 'in_person'
-                    ? 'Presencial'
-                    : 'Virtual asincrónico'}
-                </strong>
-              </p>
-
-              <p>
-                Duración:{' '}
-                {
-                  selectedQuiz.duration_minutes
-                }{' '}
-                minutos
-              </p>
-
-              <p>
-                Preguntas:{' '}
-                {
-                  selectedQuiz.number_of_slots
-                }
-              </p>
-
-              {profile.is_teacher &&
-                selectedQuiz.delivery_mode === 'in_person' && (
-                  <button
-                    type="button"
-                    onClick={handleCreateQuizSession}
-                  >
-                    {quizSession
-                      ? 'Regenerar QR de acceso'
-                      : 'Abrir acceso por QR'}
-                  </button>
-                )}
-
-              {!profile.is_teacher &&
-                selectedQuiz.delivery_mode === 'asynchronous' &&
-                !activeAttempt && (
-                  <button
-                    type="button"
-                    onClick={handleStartAsyncQuiz}
-                  >
-                    Comenzar quiz
-                  </button>
-                )}
-
-
-
-            </section>
           )}
 
           {quizSession &&
@@ -2102,7 +2374,7 @@ function handleExitProjectionMode() {
                   </p>
 
                   <p>
-                    Quiz: <strong>{selectedQuiz?.title}</strong>
+                    Evaluación: <strong>{selectedQuiz?.title}</strong>
                   </p>
 
                   <p>
@@ -2262,7 +2534,7 @@ function handleExitProjectionMode() {
           {attemptResult && (
             <section>
               <h2>
-                Resultado del quiz
+                Resultado de la evaluación
               </h2>
 
         {attemptResult.status === 'graded' ? (
@@ -2286,7 +2558,7 @@ function handleExitProjectionMode() {
                     </p>
 
                     <p>
-                      El tiempo disponible para este quiz terminó.
+                      El tiempo disponible para esta evaluación terminó.
                       Ya no es posible enviar respuestas.
                     </p>
 
@@ -2304,19 +2576,13 @@ function handleExitProjectionMode() {
                   </>
                 ) : (
               <p>
-                Tu quiz fue entregado.
+                Tu evaluación fue entregada.
                 La calificación definitiva está pendiente.
               </p>
             )}
             </section>
           )}
 
-          <button
-            type="button"
-            onClick={handleLogout}
-          >
-            Cerrar sesión
-          </button>
         </main>
 
 {/* =====================================================
@@ -2360,7 +2626,7 @@ function handleExitProjectionMode() {
     {timeWarning === 'one_minute' ? (
       <>
         ⏱ Queda aproximadamente 1 minuto
-        para finalizar el quiz.
+        para finalizar la evaluación.
       </>
     ) : (
       <>

@@ -187,6 +187,182 @@ section > button + button:hover:not(:disabled) {
   background: var(--green-100);
 }
 
+.authenticated-header {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 34px;
+}
+
+.authenticated-header h1 {
+  margin-bottom: 0;
+}
+
+.user-menu {
+  position: relative;
+}
+
+.user-menu > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: var(--text-700);
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.user-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.user-menu > summary:hover,
+.user-menu[open] > summary {
+  background: var(--green-100);
+  color: var(--green-900);
+}
+
+.user-menu > summary:focus-visible {
+  outline: 3px solid rgba(46, 107, 36, 0.2);
+  outline-offset: 2px;
+}
+
+.user-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(280px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.user-menu-panel p {
+  margin: 0;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.user-menu-panel button {
+  width: 100%;
+  margin-top: 12px;
+  border-color: #ead5d2;
+  background: #fff;
+  color: var(--danger);
+}
+
+.user-menu-panel button:hover:not(:disabled) {
+  background: #fff4f2;
+  color: #8f1c13;
+}
+
+.primary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 42px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.15fr) minmax(0, 1.15fr);
+  margin-top: 8px;
+}
+
+.dashboard-column {
+  min-width: 0;
+  margin: 0;
+  padding: 0 28px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.dashboard-column + .dashboard-column {
+  padding-right: 28px;
+  padding-left: 28px;
+  border-left: 1px solid var(--line);
+}
+
+.dashboard-column:last-child {
+  padding-right: 0;
+}
+
+.dashboard-column h2 {
+  margin-bottom: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.selection-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  margin-top: 0;
+}
+
+.selection-list li > button {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.selection-list li > button:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--soft);
+}
+
+.selection-list li > button.is-selected {
+  background: var(--green-100);
+  color: var(--green-900);
+  box-shadow: inset 3px 0 0 var(--green-700);
+}
+
+.selection-list strong,
+.selection-list small {
+  display: block;
+}
+
+.selection-list small {
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.empty-state {
+  color: var(--text-500);
+  font-size: 0.92rem;
+}
+
+.evaluation-facts {
+  display: grid;
+  gap: 5px;
+}
+
+.evaluation-facts p {
+  margin: 0;
+  color: var(--text-700);
+}
+
+.evaluation-instructions {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  color: var(--text-500);
+  font-size: 0.92rem;
+}
+
 form {
   width: min(100%, 420px);
   margin: 64px auto 0;
@@ -300,6 +476,25 @@ section > p:first-of-type:not(:only-child) {
   border-radius: 7px;
 }
 
+@media (max-width: 900px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .dashboard-column,
+  .dashboard-column + .dashboard-column,
+  .dashboard-column:last-child {
+    padding: 0;
+    border-left: 0;
+  }
+
+  .dashboard-column + .dashboard-column {
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+}
+
 @media (max-width: 700px) {
   main {
     width: min(100% - 20px, 1080px);
@@ -309,6 +504,36 @@ section > p:first-of-type:not(:only-child) {
   section {
     padding: 16px;
     border-radius: 12px;
+  }
+
+  .authenticated-header {
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 26px;
+  }
+
+  .user-menu > summary {
+    max-width: 190px;
+  }
+
+  .user-menu > summary span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .primary-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    margin-bottom: 32px;
+  }
+
+  .dashboard-column,
+  .dashboard-column + .dashboard-column,
+  .dashboard-column:last-child {
+    padding-right: 0;
+    padding-left: 0;
+    border-radius: 0;
   }
 
   ul {
