@@ -1912,8 +1912,12 @@ function renderAuthenticatedHeader() {
   }
 
   if (profile) {
+    const isSelectedEvaluationOwner =
+      Boolean(selectedQuiz) &&
+      selectedCourse?.teacher_id === profile.id
+
         if (
-  profile.is_teacher &&
+  isSelectedEvaluationOwner &&
   projectionMode &&
   quizSession
 ) {
@@ -2328,7 +2332,7 @@ function renderAuthenticatedHeader() {
                         </p>
                       )}
 
-                      {profile.is_teacher &&
+                      {isSelectedEvaluationOwner &&
                         selectedQuiz.delivery_mode === 'in_person' && (
                           <button
                             type="button"
@@ -2340,7 +2344,7 @@ function renderAuthenticatedHeader() {
                           </button>
                         )}
 
-                      {!profile.is_teacher &&
+                      {!isSelectedEvaluationOwner &&
                         selectedQuiz.delivery_mode === 'asynchronous' &&
                         !activeAttempt && (
                           <button
@@ -2365,7 +2369,7 @@ function renderAuthenticatedHeader() {
           )}
 
           {quizSession &&
-            profile.is_teacher && (
+            isSelectedEvaluationOwner && (
               <section>
                <h2>Sesión presencial activa</h2>
 
