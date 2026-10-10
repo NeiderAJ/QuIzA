@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from './supabaseClient'
 
@@ -14,6 +14,20 @@ const deliveryModeLabels = {
 }
 
 const basicEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const baseQuestionOptionIds = ['A', 'B', 'C', 'D']
+
+function createEmptyBaseQuestionDraft() {
+  return {
+    statement: '',
+    options: {
+      A: '',
+      B: '',
+      C: '',
+      D: '',
+    },
+    correctAnswer: '',
+  }
+}
 
 function App() {
   const [authMode, setAuthMode] = useState('login')
@@ -41,6 +55,18 @@ function App() {
 
   const [quizzes, setQuizzes] = useState([])
   const [selectedQuiz, setSelectedQuiz] = useState(null)
+  const [baseQuestions, setBaseQuestions] = useState([])
+  const [baseQuestionsLoadState, setBaseQuestionsLoadState] = useState({
+    quizId: null,
+    status: 'idle',
+  })
+  const [selectedQuizHasAttempts, setSelectedQuizHasAttempts] = useState(null)
+  const [baseQuestionDraft, setBaseQuestionDraft] = useState(
+    createEmptyBaseQuestionDraft
+  )
+  const [baseQuestionFormOpen, setBaseQuestionFormOpen] = useState(false)
+  const [savingBaseQuestion, setSavingBaseQuestion] = useState(false)
+  const [baseQuestionsMessage, setBaseQuestionsMessage] = useState('')
 
   const [quizSession, setQuizSession] = useState(null)
   const [projectionMode, setProjectionMode] = useState(false)
@@ -97,11 +123,118 @@ function App() {
   const tenSecondsWarningShownRef = useRef(false)
   const selectedCourseIdRef = useRef(null)
   const authorizedEmailsLoadIdRef = useRef(0)
+  const selectedQuizIdRef = useRef(null)
+  const selectedQuizCourseIdRef = useRef(null)
+  const selectedCourseTeacherIdRef = useRef(null)
+  const profileIdRef = useRef(null)
+  const baseQuestionsLoadIdRef = useRef(0)
+  const baseQuestionSaveRef = useRef(null)
 
-  selectedCourseIdRef.current = selectedCourse?.id ?? null
+  const selectedQuizId = selectedQuiz?.id ?? null
+  const selectedQuizCourseId = selectedQuiz?.course_id ?? null
+  const selectedCourseId = selectedCourse?.id ?? null
+  const selectedCourseTeacherId = selectedCourse?.teacher_id ?? null
+  const profileId = profile?.id ?? null
+
+  selectedCourseIdRef.current = selectedCourseId
+  selectedQuizIdRef.current = selectedQuizId
+  selectedQuizCourseIdRef.current = selectedQuizCourseId
+  selectedCourseTeacherIdRef.current = selectedCourseTeacherId
+  profileIdRef.current = profileId
 
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
+
+  const loadBaseQuestions = useCallback(async (quizId) => {
+    const isSelectedQuizOwner =
+      Boolean(quizId) &&
+      Boolean(selectedCourseIdRef.current) &&
+      Boolean(profileIdRef.current) &&
+      selectedQuizIdRef.current === quizId &&
+      selectedQuizCourseIdRef.current === selectedCourseIdRef.current &&
+      selectedCourseTeacherIdRef.current === profileIdRef.current
+
+    if (!isSelectedQuizOwner) {
+      return null
+    }
+
+    const loadId = baseQuestionsLoadIdRef.current + 1
+    baseQuestionsLoadIdRef.current = loadId
+    setBaseQuestionsLoadState({
+      quizId,
+      status: 'loading',
+    })
+    setSelectedQuizHasAttempts(null)
+
+    const [questionsResult, attemptsResult] = await Promise.all([
+      supabase
+        .from('questions')
+        .select(`
+          id,
+          slot_number,
+          variant_number,
+          question_type,
+          statement,
+          options,
+          correct_answer,
+          points
+        `)
+        .eq('quiz_id', quizId)
+        .eq('variant_number', 1)
+        .order('slot_number'),
+      supabase
+        .from('attempts')
+        .select('id')
+        .eq('quiz_id', quizId)
+        .limit(1),
+    ])
+
+    if (
+      loadId !== baseQuestionsLoadIdRef.current ||
+      selectedQuizIdRef.current !== quizId
+    ) {
+      return null
+    }
+
+    const editabilityLoaded = !attemptsResult.error
+
+    if (editabilityLoaded) {
+      setSelectedQuizHasAttempts(
+        (attemptsResult.data?.length ?? 0) > 0
+      )
+    }
+
+    if (questionsResult.error) {
+      setBaseQuestionsLoadState({
+        quizId,
+        status: 'error',
+      })
+      setBaseQuestionsMessage(
+        `Error cargando preguntas: ${questionsResult.error.message}`
+      )
+      return {
+        questionsLoaded: false,
+        editabilityLoaded,
+      }
+    }
+
+    setBaseQuestions(questionsResult.data ?? [])
+    setBaseQuestionsLoadState({
+      quizId,
+      status: 'success',
+    })
+
+    if (attemptsResult.error) {
+      setBaseQuestionsMessage(
+        `Error verificando si la evaluación es editable: ${attemptsResult.error.message}`
+      )
+    }
+
+    return {
+      questionsLoaded: true,
+      editabilityLoaded,
+    }
+  }, [])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -167,6 +300,41 @@ function App() {
     selectedCourse?.id,
     selectedCourse?.teacher_id,
     profile?.id,
+  ])
+
+  useEffect(() => {
+    baseQuestionsLoadIdRef.current += 1
+    baseQuestionSaveRef.current = null
+    setBaseQuestions([])
+    setBaseQuestionsLoadState({
+      quizId: selectedQuizId,
+      status: 'idle',
+    })
+    setSelectedQuizHasAttempts(null)
+    setBaseQuestionDraft(createEmptyBaseQuestionDraft())
+    setBaseQuestionFormOpen(false)
+    setSavingBaseQuestion(false)
+    setBaseQuestionsMessage('')
+
+    if (
+      !selectedQuizId ||
+      !selectedQuizCourseId ||
+      !selectedCourseId ||
+      !profileId ||
+      selectedCourseTeacherId !== profileId ||
+      selectedQuizCourseId !== selectedCourseId
+    ) {
+      return
+    }
+
+    loadBaseQuestions(selectedQuizId)
+  }, [
+    selectedQuizId,
+    selectedQuizCourseId,
+    selectedCourseId,
+    selectedCourseTeacherId,
+    profileId,
+    loadBaseQuestions,
   ])
 
   /*
@@ -732,6 +900,7 @@ useEffect(() => {
       .from('quizzes')
       .select(`
         id,
+        course_id,
         title,
         instructions,
         status,
@@ -758,6 +927,151 @@ useEffect(() => {
     setMessage('')
 
     return true
+  }
+
+  async function handleCreateBaseQuestion(event) {
+    event.preventDefault()
+
+    if (baseQuestionSaveRef.current) {
+      return
+    }
+
+    const quizIdOriginal = selectedQuiz?.id
+
+    if (
+      !selectedQuiz ||
+      !selectedCourse ||
+      selectedCourse.teacher_id !== profile?.id ||
+      selectedQuiz.course_id !== selectedCourse.id
+    ) {
+      setBaseQuestionsMessage(
+        'No tienes permiso para crear preguntas en esta evaluación.'
+      )
+      return
+    }
+
+    const isEditable =
+      ['draft', 'published'].includes(selectedQuiz.status) &&
+      baseQuestionsLoadState.quizId === quizIdOriginal &&
+      baseQuestionsLoadState.status === 'success' &&
+      selectedQuizHasAttempts === false
+
+    if (!isEditable) {
+      setBaseQuestionsMessage(
+        'Esta evaluación no está disponible para agregar preguntas.'
+      )
+      return
+    }
+
+    const statement = baseQuestionDraft.statement.trim()
+    const trimmedOptions = baseQuestionOptionIds.map((id) => ({
+      id,
+      text: baseQuestionDraft.options[id].trim(),
+    }))
+
+    if (!statement) {
+      setBaseQuestionsMessage('El enunciado no puede estar vacío.')
+      return
+    }
+
+    if (trimmedOptions.some(({ text }) => !text)) {
+      setBaseQuestionsMessage('Completa las cuatro opciones A, B, C y D.')
+      return
+    }
+
+    if (new Set(trimmedOptions.map(({ text }) => text)).size !== 4) {
+      setBaseQuestionsMessage(
+        'Las opciones no pueden estar duplicadas después de quitar espacios.'
+      )
+      return
+    }
+
+    if (!baseQuestionOptionIds.includes(baseQuestionDraft.correctAnswer)) {
+      setBaseQuestionsMessage('Selecciona exactamente una respuesta correcta.')
+      return
+    }
+
+    const slotNumber =
+      Math.max(
+        0,
+        ...baseQuestions.map(({ slot_number: currentSlotNumber }) =>
+          Number(currentSlotNumber)
+        )
+      ) + 1
+
+    const saveOperation = {
+      quizId: quizIdOriginal,
+    }
+
+    baseQuestionSaveRef.current = saveOperation
+
+    setSavingBaseQuestion(true)
+    setBaseQuestionsMessage('Guardando pregunta...')
+
+    const { error } = await supabase
+      .from('questions')
+      .insert({
+        quiz_id: selectedQuiz.id,
+        slot_number: slotNumber,
+        variant_number: 1,
+        question_type: 'multiple_choice',
+        statement,
+        options: trimmedOptions,
+        correct_answer: {
+          selected_option: baseQuestionDraft.correctAnswer,
+        },
+        points: 1,
+      })
+
+    if (
+      selectedQuizIdRef.current !== quizIdOriginal ||
+      baseQuestionSaveRef.current !== saveOperation
+    ) {
+      return
+    }
+
+    if (error) {
+      baseQuestionSaveRef.current = null
+      setBaseQuestionsMessage(
+        `No fue posible guardar la pregunta: ${error.message}`
+      )
+      setSavingBaseQuestion(false)
+      return
+    }
+
+    setBaseQuestionDraft(createEmptyBaseQuestionDraft())
+    setBaseQuestionFormOpen(false)
+    setBaseQuestionsMessage(
+      `Pregunta ${slotNumber} guardada. Actualizando la lista...`
+    )
+
+    const reloadResult = await loadBaseQuestions(quizIdOriginal)
+
+    if (
+      selectedQuizIdRef.current !== quizIdOriginal ||
+      baseQuestionSaveRef.current !== saveOperation
+    ) {
+      return
+    }
+
+    baseQuestionSaveRef.current = null
+    setSavingBaseQuestion(false)
+
+    if (!reloadResult?.questionsLoaded) {
+      setBaseQuestionsMessage(
+        'Pregunta guardada, pero no fue posible actualizar la lista. Vuelve a seleccionar la evaluación o recarga la vista.'
+      )
+      return
+    }
+
+    if (!reloadResult.editabilityLoaded) {
+      setBaseQuestionsMessage(
+        'Pregunta guardada y lista actualizada, pero no fue posible verificar si la evaluación continúa editable.'
+      )
+      return
+    }
+
+    setBaseQuestionsMessage(`Pregunta ${slotNumber} guardada correctamente.`)
   }
 
   async function loadQuizMetadata(quizId) {
@@ -1974,6 +2288,7 @@ useEffect(() => {
         })
         .select(`
           id,
+          course_id,
           title,
           instructions,
           status,
@@ -2151,7 +2466,33 @@ function renderAuthenticatedHeader() {
 
     const isSelectedEvaluationOwner =
       Boolean(selectedQuiz) &&
-      selectedCourse?.teacher_id === profile.id
+      Boolean(selectedCourse) &&
+      selectedCourse.teacher_id === profile.id &&
+      selectedQuiz.course_id === selectedCourse.id
+
+    const selectedBaseQuestionsLoadStatus =
+      baseQuestionsLoadState.quizId === selectedQuiz?.id
+        ? baseQuestionsLoadState.status
+        : 'idle'
+
+    const baseQuestionsSummary =
+      selectedBaseQuestionsLoadStatus === 'loading'
+        ? 'Cargando preguntas...'
+        : selectedBaseQuestionsLoadStatus === 'success'
+          ? `${baseQuestions.length} ${
+              baseQuestions.length === 1
+                ? 'pregunta base'
+                : 'preguntas base'
+            }`
+          : selectedBaseQuestionsLoadStatus === 'error'
+            ? 'Preguntas no disponibles'
+            : 'Preguntas pendientes de carga'
+
+    const isSelectedEvaluationEditable =
+      isSelectedEvaluationOwner &&
+      ['draft', 'published'].includes(selectedQuiz?.status) &&
+      selectedBaseQuestionsLoadStatus === 'success' &&
+      selectedQuizHasAttempts === false
 
         if (
   isSelectedEvaluationOwner &&
@@ -2556,10 +2897,13 @@ function renderAuthenticatedHeader() {
                         </p>
 
                         <p>
-                          {selectedQuiz.number_of_slots ?? 0}{' '}
-                          {selectedQuiz.number_of_slots === 1
-                            ? 'pregunta'
-                            : 'preguntas'}
+                          {isSelectedEvaluationOwner
+                            ? baseQuestionsSummary
+                            : `${selectedQuiz.number_of_slots ?? 0} ${
+                                selectedQuiz.number_of_slots === 1
+                                  ? 'pregunta'
+                                  : 'preguntas'
+                              }`}
                         </p>
                       </div>
 
@@ -2570,7 +2914,8 @@ function renderAuthenticatedHeader() {
                       )}
 
                       {isSelectedEvaluationOwner &&
-                        selectedQuiz.delivery_mode === 'in_person' && (
+                        selectedQuiz.delivery_mode === 'in_person' &&
+                        selectedQuiz.status === 'published' && (
                           <button
                             type="button"
                             onClick={handleCreateQuizSession}
@@ -2600,8 +2945,179 @@ function renderAuthenticatedHeader() {
                       </p>
                     </>
                   )}
-                </section>
-              </div>
+                  </section>
+                </div>
+
+              {selectedQuiz &&
+                isSelectedEvaluationOwner && (
+                  <section
+                    className="questions-section"
+                    aria-labelledby="questions-heading"
+                  >
+                    <div className="questions-header">
+                      <div>
+                        <h2 id="questions-heading">Preguntas</h2>
+                        <p>{baseQuestionsSummary}</p>
+                      </div>
+
+                  {isSelectedEvaluationEditable && !baseQuestionFormOpen && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBaseQuestionFormOpen(true)
+                        setBaseQuestionsMessage('')
+                      }}
+                      disabled={savingBaseQuestion}
+                    >
+                      Agregar pregunta
+                    </button>
+                  )}
+                    </div>
+
+                    {baseQuestionFormOpen &&
+                      isSelectedEvaluationEditable && (
+                        <form
+                          className="base-question-form"
+                          onSubmit={handleCreateBaseQuestion}
+                        >
+                          <label>
+                            Enunciado
+                            <textarea
+                              value={baseQuestionDraft.statement}
+                              onChange={(event) =>
+                                setBaseQuestionDraft((draft) => ({
+                                  ...draft,
+                                  statement: event.target.value,
+                                }))
+                              }
+                              rows="4"
+                              disabled={savingBaseQuestion}
+                            />
+                          </label>
+
+                          {baseQuestionOptionIds.map((optionId) => (
+                            <label key={optionId}>
+                              Opción {optionId}
+                              <input
+                                type="text"
+                                value={baseQuestionDraft.options[optionId]}
+                                onChange={(event) =>
+                                  setBaseQuestionDraft((draft) => ({
+                                    ...draft,
+                                    options: {
+                                      ...draft.options,
+                                      [optionId]: event.target.value,
+                                    },
+                                  }))
+                                }
+                                disabled={savingBaseQuestion}
+                              />
+                            </label>
+                          ))}
+
+                          <fieldset>
+                            <legend>Respuesta correcta</legend>
+
+                            <div className="correct-answer-options">
+                              {baseQuestionOptionIds.map((optionId) => (
+                                <label key={optionId}>
+                                  <input
+                                    type="radio"
+                                    name="base-question-correct-answer"
+                                    value={optionId}
+                                    checked={
+                                      baseQuestionDraft.correctAnswer === optionId
+                                    }
+                                    onChange={() =>
+                                      setBaseQuestionDraft((draft) => ({
+                                        ...draft,
+                                        correctAnswer: optionId,
+                                      }))
+                                    }
+                                    disabled={savingBaseQuestion}
+                                  />
+                                  {optionId}
+                                </label>
+                              ))}
+                            </div>
+                          </fieldset>
+
+                          <div className="question-form-actions">
+                            <button
+                              type="submit"
+                              disabled={savingBaseQuestion}
+                            >
+                              {savingBaseQuestion
+                                ? 'Guardando...'
+                                : 'Guardar pregunta'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setBaseQuestionDraft(
+                                  createEmptyBaseQuestionDraft()
+                                )
+                                setBaseQuestionFormOpen(false)
+                                setBaseQuestionsMessage('')
+                              }}
+                              disabled={savingBaseQuestion}
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </form>
+                      )}
+
+                    {baseQuestionsMessage && (
+                      <p className="questions-message" role="status">
+                        {baseQuestionsMessage}
+                      </p>
+                    )}
+
+                    {selectedBaseQuestionsLoadStatus === 'loading' ? (
+                      <p className="empty-state">Cargando preguntas...</p>
+                    ) : selectedBaseQuestionsLoadStatus === 'error' ? (
+                      <p className="empty-state">
+                        No fue posible cargar las preguntas.
+                      </p>
+                    ) : selectedBaseQuestionsLoadStatus === 'success' &&
+                      baseQuestions.length === 0 ? (
+                      <p className="empty-state">
+                        No hay preguntas base todavía.
+                      </p>
+                    ) : selectedBaseQuestionsLoadStatus === 'success' ? (
+                      <ol className="base-question-list">
+                        {baseQuestions.map((question) => (
+                          <li key={question.id}>
+                            <h3>Pregunta {question.slot_number}</h3>
+                            <p>{question.statement}</p>
+
+                            {question.question_type === 'multiple_choice' &&
+                              Array.isArray(question.options) && (
+                                <ul className="base-question-options">
+                                  {question.options.map((option) => (
+                                    <li key={option.id}>
+                                      <strong>{option.id}.</strong>{' '}
+                                      {option.text}
+                                      {question.correct_answer?.selected_option ===
+                                        option.id && (
+                                        <span> (correcta)</span>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="empty-state">
+                        Preparando preguntas...
+                      </p>
+                    )}
+                  </section>
+                )}
 
               {selectedCourse &&
                 isSelectedCourseOwner && (
