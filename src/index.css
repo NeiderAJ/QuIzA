@@ -534,6 +534,112 @@ section > button + button:hover:not(:disabled) {
   font-weight: 750;
 }
 
+.survey-manager {
+  width: min(100%, 920px);
+  margin-top: 28px;
+}
+
+.survey-create-form {
+  width: min(100%, 640px);
+  margin: 24px 0 0;
+}
+
+.survey-create-form textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #cfd6cd;
+  border-radius: 9px;
+  resize: vertical;
+}
+
+.survey-option-draft {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.survey-option-draft label {
+  margin: 0;
+}
+
+.survey-option-draft button {
+  min-height: 42px;
+  margin: 0;
+}
+
+.survey-dashboard {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.4fr);
+  gap: 30px;
+  margin-top: 20px;
+}
+
+.survey-detail {
+  min-width: 0;
+  padding-left: 30px;
+  border-left: 1px solid var(--line);
+}
+
+.survey-qr {
+  margin: 24px 0;
+  text-align: center;
+}
+
+.survey-results {
+  display: grid;
+  gap: 0;
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.survey-results li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.public-survey-page {
+  width: min(100% - 32px, 620px);
+}
+
+.public-survey-page section {
+  margin-top: 24px;
+}
+
+.public-survey-page form {
+  margin: 20px 0;
+}
+
+.public-survey-page fieldset {
+  padding: 0;
+  border: 0;
+}
+
+.public-survey-page legend {
+  margin-bottom: 18px;
+  color: var(--text-900);
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.survey-answer-options {
+  display: grid;
+  gap: 10px;
+}
+
+.survey-answer-options label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
 .participants-section h2 {
   margin-bottom: 4px;
 }
@@ -982,6 +1088,21 @@ section > p:first-of-type:not(:only-child) {
   .result-response-list dl,
   .live-session-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .survey-dashboard {
+    grid-template-columns: 1fr;
+  }
+
+  .survey-detail {
+    padding-top: 24px;
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .survey-option-draft {
+    grid-template-columns: 1fr;
   }
 
   .questions-section {

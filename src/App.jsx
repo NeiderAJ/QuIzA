@@ -45,6 +45,23 @@ function formatAnswerPayload(answerPayload) {
   return answerPayload.selected_option ?? JSON.stringify(answerPayload)
 }
 
+function createEmptySurveyOptions() {
+  return ['', '']
+}
+
+function createAnonymousRespondentToken() {
+  if (typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID()
+  }
+
+  const randomBytes = new Uint8Array(32)
+  window.crypto.getRandomValues(randomBytes)
+
+  return Array.from(randomBytes, (value) =>
+    value.toString(16).padStart(2, '0')
+  ).join('')
+}
+
 function App() {
   const [authMode, setAuthMode] = useState('login')
   const [fullName, setFullName] = useState('')
@@ -59,6 +76,28 @@ function App() {
   const [evaluationGroup, setEvaluationGroup] = useState('')
   const [evaluationInstructions, setEvaluationInstructions] = useState('')
   const [creatingEvaluation, setCreatingEvaluation] = useState(false)
+
+  const [surveyQuestion, setSurveyQuestion] = useState('')
+  const [surveyOptionDrafts, setSurveyOptionDrafts] = useState(
+    createEmptySurveyOptions
+  )
+  const [creatingSurvey, setCreatingSurvey] = useState(false)
+  const [surveys, setSurveys] = useState([])
+  const [loadingSurveys, setLoadingSurveys] = useState(false)
+  const [selectedSurvey, setSelectedSurvey] = useState(null)
+  const [surveyAccess, setSurveyAccess] = useState(null)
+  const [surveyResults, setSurveyResults] = useState([])
+  const [loadingSurveyResults, setLoadingSurveyResults] = useState(false)
+  const [surveyMessage, setSurveyMessage] = useState('')
+  const [publicSurveyToken, setPublicSurveyToken] = useState(() =>
+    new URLSearchParams(window.location.search).get('survey')
+  )
+  const [publicSurvey, setPublicSurvey] = useState(null)
+  const [publicSurveyLoadState, setPublicSurveyLoadState] = useState('idle')
+  const [publicSurveyAnswer, setPublicSurveyAnswer] = useState('')
+  const [submittingSurveyResponse, setSubmittingSurveyResponse] =
+    useState(false)
+  const [publicSurveyMessage, setPublicSurveyMessage] = useState('')
 
   const [courses, setCourses] = useState([])
   const [selectedCourse, setSelectedCourse] = useState(null)
@@ -283,9 +322,14 @@ function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const token = params.get('join')
+    const surveyToken = params.get('survey')
 
     if (token) {
       setJoinToken(token)
+    }
+
+    if (surveyToken) {
+      setPublicSurveyToken(surveyToken)
     }
 
     async function restoreSession() {
@@ -323,6 +367,49 @@ function App() {
 
     restoreSession()
   }, [])
+
+  useEffect(() => {
+    if (!publicSurveyToken) {
+      setPublicSurvey(null)
+      setPublicSurveyLoadState('idle')
+      setPublicSurveyAnswer('')
+      setPublicSurveyMessage('')
+      return
+    }
+
+    let cancelled = false
+
+    async function loadPublicSurvey() {
+      setPublicSurveyLoadState('loading')
+      setPublicSurveyMessage('')
+
+      const { data, error } = await supabase.rpc('get_public_survey', {
+        p_qr_token: publicSurveyToken,
+      })
+
+      if (cancelled) {
+        return
+      }
+
+      if (error || !data?.[0]) {
+        setPublicSurvey(null)
+        setPublicSurveyLoadState('error')
+        setPublicSurveyMessage(
+          error?.message ?? 'No fue posible abrir esta encuesta.'
+        )
+        return
+      }
+
+      setPublicSurvey(data[0])
+      setPublicSurveyLoadState('success')
+    }
+
+    loadPublicSurvey()
+
+    return () => {
+      cancelled = true
+    }
+  }, [publicSurveyToken])
 
   useEffect(() => {
     authorizedEmailsLoadIdRef.current += 1
@@ -2576,6 +2663,15 @@ useEffect(() => {
 
     setQuizSession(null)
 
+    setSurveyQuestion('')
+    setSurveyOptionDrafts(createEmptySurveyOptions())
+    setCreatingSurvey(false)
+    setSurveys([])
+    setSelectedSurvey(null)
+    setSurveyAccess(null)
+    setSurveyResults([])
+    setSurveyMessage('')
+
     setJoinToken(null)
     setActiveAttempt(null)
 
@@ -2599,6 +2695,227 @@ useEffect(() => {
     setSelectedCourse(course)
 
     await loadQuizzes(course.id)
+  }
+
+  async function loadSurveys() {
+    setLoadingSurveys(true)
+
+    const { data, error } = await supabase
+      .from('surveys')
+      .select('id, question, options, status, created_at, updated_at')
+      .order('created_at', { ascending: false })
+
+    setLoadingSurveys(false)
+
+    if (error) {
+      setSurveyMessage(`Error cargando encuestas: ${error.message}`)
+      return null
+    }
+
+    setSurveys(data ?? [])
+    return data ?? []
+  }
+
+  async function openSurveyManager() {
+    setAuthenticatedView('create-survey')
+    setSurveyMessage('')
+    await loadSurveys()
+  }
+
+  async function loadSurveyResults(surveyId) {
+    if (!surveyId) {
+      return false
+    }
+
+    setLoadingSurveyResults(true)
+
+    const { data, error } = await supabase.rpc('get_survey_results', {
+      p_survey_id: surveyId,
+    })
+
+    setLoadingSurveyResults(false)
+
+    if (error) {
+      setSurveyMessage(`Error cargando resultados: ${error.message}`)
+      return false
+    }
+
+    setSurveyResults(data ?? [])
+    return true
+  }
+
+  async function handleSurveySelect(survey) {
+    setSelectedSurvey(survey)
+    setSurveyAccess(null)
+    setSurveyResults([])
+    setSurveyMessage('')
+    await loadSurveyResults(survey.id)
+  }
+
+  async function handleCreateSurvey(event) {
+    event.preventDefault()
+
+    const question = surveyQuestion.trim()
+    const options = surveyOptionDrafts.map((option) => option.trim())
+
+    if (!question || options.some((option) => !option)) {
+      setSurveyMessage('Completa la pregunta y todas las opciones.')
+      return
+    }
+
+    setCreatingSurvey(true)
+    setSurveyMessage('Creando encuesta...')
+
+    const created = await supabase.rpc('create_survey', {
+      p_question: question,
+      p_options: options,
+    })
+
+    if (created.error) {
+      setCreatingSurvey(false)
+      setSurveyMessage(`Error creando encuesta: ${created.error.message}`)
+      return
+    }
+
+    const opened = await supabase.rpc('open_survey', {
+      p_survey_id: created.data,
+    })
+
+    if (opened.error || !opened.data?.[0]) {
+      setCreatingSurvey(false)
+      setSurveyMessage(
+        `La encuesta se creó, pero no fue posible generar el QRS: ${
+          opened.error?.message ?? 'respuesta vacía'
+        }`
+      )
+      await loadSurveys()
+      return
+    }
+
+    const loadedSurveys = await loadSurveys()
+    const createdSurvey = loadedSurveys?.find(
+      (survey) => survey.id === created.data
+    )
+
+    setCreatingSurvey(false)
+    setSurveyQuestion('')
+    setSurveyOptionDrafts(createEmptySurveyOptions())
+    setSelectedSurvey(createdSurvey ?? null)
+    setSurveyAccess(opened.data[0])
+    setSurveyResults(
+      options.map((optionText, index) => ({
+        option_number: index + 1,
+        option_text: optionText,
+        response_count: 0,
+      }))
+    )
+    setSurveyMessage('Encuesta creada y QRS activo ✅')
+  }
+
+  async function handleOpenSurvey() {
+    if (!selectedSurvey) {
+      return
+    }
+
+    setSurveyMessage('Generando un nuevo QRS...')
+
+    const { data, error } = await supabase.rpc('open_survey', {
+      p_survey_id: selectedSurvey.id,
+    })
+
+    if (error || !data?.[0]) {
+      setSurveyMessage(
+        `No fue posible generar el QRS: ${error?.message ?? 'respuesta vacía'}`
+      )
+      return
+    }
+
+    setSurveyAccess(data[0])
+    setSelectedSurvey((survey) => ({ ...survey, status: 'active' }))
+    setSurveys((currentSurveys) =>
+      currentSurveys.map((survey) =>
+        survey.id === selectedSurvey.id
+          ? { ...survey, status: 'active' }
+          : survey
+      )
+    )
+    setSurveyMessage('QRS activo ✅')
+  }
+
+  async function handleCloseSurvey() {
+    if (!selectedSurvey) {
+      return
+    }
+
+    const { error } = await supabase.rpc('close_survey', {
+      p_survey_id: selectedSurvey.id,
+    })
+
+    if (error) {
+      setSurveyMessage(`No fue posible cerrar la encuesta: ${error.message}`)
+      return
+    }
+
+    setSurveyAccess(null)
+    setSelectedSurvey((survey) => ({ ...survey, status: 'closed' }))
+    setSurveys((currentSurveys) =>
+      currentSurveys.map((survey) =>
+        survey.id === selectedSurvey.id
+          ? { ...survey, status: 'closed' }
+          : survey
+      )
+    )
+    setSurveyMessage('Encuesta cerrada. El QRS ya no admite respuestas.')
+  }
+
+  async function handleSubmitSurveyResponse(event) {
+    event.preventDefault()
+
+    if (!publicSurvey || !publicSurveyAnswer || !publicSurveyToken) {
+      setPublicSurveyMessage('Selecciona una opción antes de responder.')
+      return
+    }
+
+    const storageKey = `quiza_survey_respondent_${publicSurvey.survey_id}`
+    let respondentToken
+
+    try {
+      respondentToken = window.localStorage.getItem(storageKey)
+
+      if (!respondentToken) {
+        respondentToken = createAnonymousRespondentToken()
+        window.localStorage.setItem(storageKey, respondentToken)
+      }
+    } catch {
+      respondentToken = createAnonymousRespondentToken()
+    }
+
+    setSubmittingSurveyResponse(true)
+    setPublicSurveyMessage('Registrando respuesta...')
+
+    const { data, error } = await supabase.rpc('submit_survey_response', {
+      p_qr_token: publicSurveyToken,
+      p_respondent_token: respondentToken,
+      p_selected_option: publicSurveyAnswer,
+    })
+
+    setSubmittingSurveyResponse(false)
+
+    if (error) {
+      setPublicSurveyMessage(`No fue posible responder: ${error.message}`)
+      return
+    }
+
+    setPublicSurveyMessage(
+      data
+        ? 'Respuesta registrada. Gracias por participar ✅'
+        : 'Este dispositivo ya respondió esta encuesta.'
+    )
+  }
+
+  function handleLeavePublicSurvey() {
+    window.history.replaceState({}, '', window.location.pathname)
+    setPublicSurveyToken(null)
   }
 
   async function findOwnedCourseByNickname(userId, nickname) {
@@ -3013,6 +3330,64 @@ function renderAuthenticatedHeader() {
     return <p>Cargando QuIzA...</p>
   }
 
+  if (publicSurveyToken) {
+    return (
+      <main className="public-survey-page">
+        <h1>QuIzA</h1>
+
+        <section aria-labelledby="public-survey-heading">
+          <h2 id="public-survey-heading">Encuesta rápida</h2>
+
+          {publicSurveyLoadState === 'loading' ? (
+            <p>Cargando encuesta...</p>
+          ) : publicSurveyLoadState === 'error' ? (
+            <p role="alert">{publicSurveyMessage}</p>
+          ) : publicSurvey ? (
+            <form onSubmit={handleSubmitSurveyResponse}>
+              <fieldset disabled={submittingSurveyResponse}>
+                <legend>{publicSurvey.question}</legend>
+
+                <div className="survey-answer-options">
+                  {publicSurvey.options.map((option) => (
+                    <label key={option}>
+                      <input
+                        type="radio"
+                        name="survey-answer"
+                        value={option}
+                        checked={publicSurveyAnswer === option}
+                        onChange={() => setPublicSurveyAnswer(option)}
+                      />
+                      {option}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <button
+                type="submit"
+                disabled={
+                  submittingSurveyResponse || !publicSurveyAnswer
+                }
+              >
+                {submittingSurveyResponse
+                  ? 'Enviando...'
+                  : 'Enviar respuesta'}
+              </button>
+
+              {publicSurveyMessage && (
+                <p role="status">{publicSurveyMessage}</p>
+              )}
+            </form>
+          ) : null}
+
+          <button type="button" onClick={handleLeavePublicSurvey}>
+            Ir a QuIzA
+          </button>
+        </section>
+      </main>
+    )
+  }
+
   if (profile) {
     const isSelectedCourseOwner =
       Boolean(selectedCourse) &&
@@ -3156,6 +3531,207 @@ function renderAuthenticatedHeader() {
       integrityAlert
 
     if (
+      authenticatedView === 'create-survey' &&
+      !hasPriorityQuizFlow
+    ) {
+      return (
+        <main>
+          {renderAuthenticatedHeader()}
+
+          <section className="survey-manager">
+            <div className="results-header">
+              <div>
+                <h2>Crear encuesta rápida</h2>
+                <p>
+                  Las respuestas son anónimas y no se relacionan con cuentas,
+                  grupos ni evaluaciones.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthenticatedView('panel-v1')
+                  setSurveyMessage('')
+                }}
+                disabled={creatingSurvey}
+              >
+                Volver al dashboard
+              </button>
+            </div>
+
+            <form
+              className="survey-create-form"
+              onSubmit={handleCreateSurvey}
+            >
+              <label>
+                Pregunta
+                <textarea
+                  value={surveyQuestion}
+                  onChange={(event) =>
+                    setSurveyQuestion(event.target.value)
+                  }
+                  rows="3"
+                  required
+                  disabled={creatingSurvey}
+                />
+              </label>
+
+              {surveyOptionDrafts.map((option, index) => (
+                <div className="survey-option-draft" key={index}>
+                  <label>
+                    Opción {index + 1}
+                    <input
+                      type="text"
+                      value={option}
+                      onChange={(event) =>
+                        setSurveyOptionDrafts((currentOptions) =>
+                          currentOptions.map((currentOption, optionIndex) =>
+                            optionIndex === index
+                              ? event.target.value
+                              : currentOption
+                          )
+                        )
+                      }
+                      required
+                      disabled={creatingSurvey}
+                    />
+                  </label>
+
+                  {surveyOptionDrafts.length > 2 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSurveyOptionDrafts((currentOptions) =>
+                          currentOptions.filter(
+                            (_, optionIndex) => optionIndex !== index
+                          )
+                        )
+                      }
+                      disabled={creatingSurvey}
+                    >
+                      Eliminar
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {surveyOptionDrafts.length < 10 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSurveyOptionDrafts((currentOptions) => [
+                      ...currentOptions,
+                      '',
+                    ])
+                  }
+                  disabled={creatingSurvey}
+                >
+                  Agregar opción
+                </button>
+              )}
+
+              <button type="submit" disabled={creatingSurvey}>
+                {creatingSurvey ? 'Creando...' : 'Crear y abrir QRS'}
+              </button>
+            </form>
+
+            {surveyMessage && <p role="status">{surveyMessage}</p>}
+          </section>
+
+          <section className="survey-manager">
+            <h2>Mis encuestas</h2>
+
+            {loadingSurveys ? (
+              <p>Cargando encuestas...</p>
+            ) : surveys.length === 0 ? (
+              <p className="empty-state">No has creado encuestas todavía.</p>
+            ) : (
+              <div className="survey-dashboard">
+                <ul className="selection-list">
+                  {surveys.map((survey) => (
+                    <li key={survey.id}>
+                      <button
+                        type="button"
+                        className={
+                          selectedSurvey?.id === survey.id
+                            ? 'is-selected'
+                            : ''
+                        }
+                        aria-pressed={selectedSurvey?.id === survey.id}
+                        onClick={() => handleSurveySelect(survey)}
+                      >
+                        <strong>{survey.question}</strong>
+                        <small>{survey.status}</small>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+
+                {selectedSurvey && (
+                  <div className="survey-detail">
+                    <h3>{selectedSurvey.question}</h3>
+                    <p>Estado: {selectedSurvey.status}</p>
+
+                    <button type="button" onClick={handleOpenSurvey}>
+                      {selectedSurvey.status === 'active'
+                        ? 'Regenerar QRS'
+                        : 'Abrir QRS'}
+                    </button>
+
+                    {selectedSurvey.status === 'active' && (
+                      <button type="button" onClick={handleCloseSurvey}>
+                        Cerrar encuesta
+                      </button>
+                    )}
+
+                    {surveyAccess && (
+                      <div className="survey-qr">
+                        <QRCodeSVG
+                          value={`${window.location.origin}/?survey=${encodeURIComponent(
+                            surveyAccess.qr_token
+                          )}`}
+                          size={240}
+                        />
+                        <p>
+                          Este QRS solo abre la encuesta y no contiene datos
+                          personales.
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="results-header">
+                      <h3>Resultados agregados</h3>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          loadSurveyResults(selectedSurvey.id)
+                        }
+                        disabled={loadingSurveyResults}
+                      >
+                        {loadingSurveyResults
+                          ? 'Actualizando...'
+                          : 'Actualizar'}
+                      </button>
+                    </div>
+
+                    <ul className="survey-results">
+                      {surveyResults.map((result) => (
+                        <li key={result.option_number}>
+                          <span>{result.option_text}</span>
+                          <strong>{result.response_count}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        </main>
+      )
+    }
+
+    if (
       authenticatedView === 'home' &&
       !hasPriorityQuizFlow
     ) {
@@ -3190,11 +3766,7 @@ function renderAuthenticatedHeader() {
 
             <button
               type="button"
-              onClick={() =>
-                setMessage(
-                  'La creación de encuestas rápidas aún está en desarrollo.'
-                )
-              }
+              onClick={openSurveyManager}
             >
               Crear encuesta rápida
             </button>
@@ -3359,12 +3931,7 @@ function renderAuthenticatedHeader() {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setAuthenticatedView('panel-v1')
-                    setMessage(
-                      'La creación de encuestas rápidas aún está en desarrollo.'
-                    )
-                  }}
+                  onClick={openSurveyManager}
                 >
                   Crear encuesta rápida
                 </button>
