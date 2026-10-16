@@ -374,6 +374,134 @@ section > button + button:hover:not(:disabled) {
   box-shadow: none;
 }
 
+.results-section {
+  width: min(100%, 960px);
+  margin-top: 36px;
+  padding: 28px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.results-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.results-header h2,
+.results-header h3,
+.results-header p {
+  margin: 0;
+}
+
+.results-header p {
+  color: var(--text-500);
+  font-size: 0.92rem;
+}
+
+.results-table-wrapper {
+  margin-top: 20px;
+  overflow-x: auto;
+}
+
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.results-table th,
+.results-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.results-table td strong,
+.results-table td small {
+  display: block;
+}
+
+.results-table td small {
+  color: var(--text-500);
+}
+
+.results-table td button {
+  min-height: 34px;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.result-detail {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.result-response-list {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.result-response-list > li {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.result-response-list h4,
+.result-response-list p {
+  margin-top: 0;
+}
+
+.result-response-list dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 0;
+}
+
+.result-response-list dt {
+  color: var(--text-500);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.result-response-list dd {
+  margin: 3px 0 0;
+}
+
+.live-session-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 24px 0;
+}
+
+.live-session-metrics div {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  text-align: center;
+}
+
+.live-session-metrics dt {
+  color: var(--text-500);
+  font-size: 0.82rem;
+}
+
+.live-session-metrics dd {
+  margin: 4px 0 0;
+  font-size: 1.35rem;
+  font-weight: 750;
+}
+
 .participants-section h2 {
   margin-bottom: 4px;
 }
@@ -808,6 +936,20 @@ section > p:first-of-type:not(:only-child) {
 
   .participants-section {
     width: 100%;
+  }
+
+  .results-section {
+    width: 100%;
+  }
+
+  .results-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .result-response-list dl,
+  .live-session-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .questions-section {

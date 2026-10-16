@@ -13,6 +13,14 @@ const deliveryModeLabels = {
   asynchronous: 'Virtual asincrónica',
 }
 
+const attemptStatusLabels = {
+  in_progress: 'En curso',
+  submitted: 'Entregado',
+  graded: 'Calificado',
+  expired: 'Vencido',
+  blocked: 'Bloqueado',
+}
+
 const basicEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const baseQuestionOptionIds = ['A', 'B', 'C', 'D']
 
@@ -27,6 +35,14 @@ function createEmptyBaseQuestionDraft() {
     },
     correctAnswer: '',
   }
+}
+
+function formatAnswerPayload(answerPayload) {
+  if (!answerPayload) {
+    return 'Sin respuesta'
+  }
+
+  return answerPayload.selected_option ?? JSON.stringify(answerPayload)
 }
 
 function App() {
@@ -77,6 +93,21 @@ function App() {
   const [duplicatingQuiz, setDuplicatingQuiz] = useState(false)
 
   const [quizSession, setQuizSession] = useState(null)
+  const [liveSessionStatus, setLiveSessionStatus] = useState(null)
+  const [liveSessionStatusError, setLiveSessionStatusError] = useState('')
+  const [quizResults, setQuizResults] = useState([])
+  const [quizResultsState, setQuizResultsState] = useState({
+    quizId: null,
+    status: 'idle',
+    error: '',
+  })
+  const [selectedResultAttemptId, setSelectedResultAttemptId] = useState(null)
+  const [attemptResultDetail, setAttemptResultDetail] = useState([])
+  const [attemptResultDetailState, setAttemptResultDetailState] = useState({
+    attemptId: null,
+    status: 'idle',
+    error: '',
+  })
   const [projectionMode, setProjectionMode] = useState(false)
 
   const [joinToken, setJoinToken] = useState(null)
@@ -131,6 +162,8 @@ function App() {
   const baseQuestionsLoadIdRef = useRef(0)
   const baseQuestionSaveRef = useRef(null)
   const questionOperationRef = useRef(null)
+  const quizResultsLoadIdRef = useRef(0)
+  const attemptResultDetailLoadIdRef = useRef(0)
 
   const baseQuestions = questionVariants.filter(
     ({ variant_number: variantNumber }) => variantNumber === 1
@@ -328,6 +361,21 @@ function App() {
     setSavingQuestionId(null)
     setPublishingQuiz(false)
     setDuplicatingQuiz(false)
+    quizResultsLoadIdRef.current += 1
+    attemptResultDetailLoadIdRef.current += 1
+    setQuizResults([])
+    setQuizResultsState({
+      quizId: selectedQuizId,
+      status: 'idle',
+      error: '',
+    })
+    setSelectedResultAttemptId(null)
+    setAttemptResultDetail([])
+    setAttemptResultDetailState({
+      attemptId: null,
+      status: 'idle',
+      error: '',
+    })
 
     if (
       !selectedQuizId ||
@@ -341,6 +389,7 @@ function App() {
     }
 
     loadBaseQuestions(selectedQuizId)
+    loadQuizResults(selectedQuizId)
   }, [
     selectedQuizId,
     selectedQuizCourseId,
@@ -349,6 +398,50 @@ function App() {
     profileId,
     loadBaseQuestions,
   ])
+
+  useEffect(() => {
+    const quizSessionId = quizSession?.quiz_session_id
+
+    setLiveSessionStatus(null)
+    setLiveSessionStatusError('')
+
+    if (!quizSessionId) {
+      return
+    }
+
+    let cancelled = false
+
+    async function refreshLiveSessionStatus() {
+      const { data, error } = await supabase.rpc(
+        'get_quiz_session_live_status',
+        { p_quiz_session_id: quizSessionId }
+      )
+
+      if (cancelled) {
+        return
+      }
+
+      if (error) {
+        setLiveSessionStatusError(error.message)
+        return
+      }
+
+      setLiveSessionStatus(data?.[0] ?? null)
+      setLiveSessionStatusError('')
+    }
+
+    refreshLiveSessionStatus()
+
+    const refreshId = window.setInterval(
+      refreshLiveSessionStatus,
+      5000
+    )
+
+    return () => {
+      cancelled = true
+      window.clearInterval(refreshId)
+    }
+  }, [quizSession?.quiz_session_id])
 
   /*
    * ============================================================
@@ -2667,6 +2760,92 @@ useEffect(() => {
   setMessage('')
 }
 
+  async function loadQuizResults(quizId) {
+    if (!quizId) {
+      return false
+    }
+
+    const loadId = quizResultsLoadIdRef.current + 1
+    quizResultsLoadIdRef.current = loadId
+    setQuizResultsState({
+      quizId,
+      status: 'loading',
+      error: '',
+    })
+
+    const { data, error } = await supabase.rpc('get_quiz_results', {
+      p_quiz_id: quizId,
+    })
+
+    if (
+      loadId !== quizResultsLoadIdRef.current ||
+      selectedQuizIdRef.current !== quizId
+    ) {
+      return false
+    }
+
+    if (error) {
+      setQuizResultsState({
+        quizId,
+        status: 'error',
+        error: error.message,
+      })
+      return false
+    }
+
+    setQuizResults(data ?? [])
+    setQuizResultsState({
+      quizId,
+      status: 'success',
+      error: '',
+    })
+    return true
+  }
+
+  async function handleLoadAttemptResultDetail(attemptId) {
+    if (!attemptId) {
+      return
+    }
+
+    const loadId = attemptResultDetailLoadIdRef.current + 1
+    attemptResultDetailLoadIdRef.current = loadId
+    setSelectedResultAttemptId(attemptId)
+    setAttemptResultDetail([])
+    setAttemptResultDetailState({
+      attemptId,
+      status: 'loading',
+      error: '',
+    })
+
+    const { data, error } = await supabase.rpc(
+      'get_attempt_result_detail',
+      { p_attempt_id: attemptId }
+    )
+
+    if (
+      loadId !== attemptResultDetailLoadIdRef.current ||
+      selectedQuizIdRef.current !== selectedQuiz?.id
+    ) {
+      return
+    }
+
+    if (error) {
+      setAttemptResultDetailState({
+        attemptId,
+        status: 'error',
+        error: error.message,
+      })
+      return
+    }
+
+    setAttemptResultDetail(data ?? [])
+    setAttemptResultDetailState({
+      attemptId,
+      status: 'success',
+      error: '',
+    })
+  }
+
   async function handleCreateQuizSession() {
     if (!selectedQuiz) {
       return
@@ -3672,6 +3851,189 @@ function renderAuthenticatedHeader() {
                   </section>
                 )}
 
+              {selectedQuiz &&
+                isSelectedEvaluationOwner && (
+                  <section
+                    className="results-section"
+                    aria-labelledby="results-heading"
+                  >
+                    <div className="results-header">
+                      <div>
+                        <h2 id="results-heading">Resultados</h2>
+                        <p>
+                          {quizResults.length}{' '}
+                          {quizResults.length === 1
+                            ? 'intento registrado'
+                            : 'intentos registrados'}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => loadQuizResults(selectedQuiz.id)}
+                        disabled={quizResultsState.status === 'loading'}
+                      >
+                        {quizResultsState.status === 'loading'
+                          ? 'Actualizando...'
+                          : 'Actualizar resultados'}
+                      </button>
+                    </div>
+
+                    {quizResultsState.status === 'error' ? (
+                      <p role="alert">
+                        Error cargando resultados:{' '}
+                        {quizResultsState.error}
+                      </p>
+                    ) : quizResultsState.status === 'loading' &&
+                      quizResults.length === 0 ? (
+                      <p className="empty-state">Cargando resultados...</p>
+                    ) : quizResults.length === 0 ? (
+                      <p className="empty-state">
+                        Todavía no hay intentos para esta evaluación.
+                      </p>
+                    ) : (
+                      <div className="results-table-wrapper">
+                        <table className="results-table">
+                          <thead>
+                            <tr>
+                              <th>Participante</th>
+                              <th>Estado</th>
+                              <th>Puntaje</th>
+                              <th>Nota</th>
+                              <th>Incidencias</th>
+                              <th>Detalle</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {quizResults.map((result) => (
+                              <tr key={result.attempt_id}>
+                                <td>
+                                  <strong>{result.student_name}</strong>
+                                  <small>{result.student_email}</small>
+                                </td>
+                                <td>
+                                  {attemptStatusLabels[
+                                    result.attempt_status
+                                  ] ?? result.attempt_status}
+                                </td>
+                                <td>
+                                  {result.score_points ?? 'Pendiente'}
+                                </td>
+                                <td>{result.grade ?? 'Pendiente'}</td>
+                                <td>{result.focus_violation_count}</td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleLoadAttemptResultDetail(
+                                        result.attempt_id
+                                      )
+                                    }
+                                    disabled={
+                                      attemptResultDetailState.status ===
+                                        'loading' &&
+                                      selectedResultAttemptId ===
+                                        result.attempt_id
+                                    }
+                                  >
+                                    {attemptResultDetailState.status ===
+                                      'loading' &&
+                                    selectedResultAttemptId ===
+                                      result.attempt_id
+                                      ? 'Cargando...'
+                                      : 'Ver detalle'}
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {selectedResultAttemptId && (
+                      <div className="result-detail">
+                        <div className="results-header">
+                          <h3>Detalle del intento</h3>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              attemptResultDetailLoadIdRef.current += 1
+                              setSelectedResultAttemptId(null)
+                              setAttemptResultDetail([])
+                              setAttemptResultDetailState({
+                                attemptId: null,
+                                status: 'idle',
+                                error: '',
+                              })
+                            }}
+                          >
+                            Cerrar detalle
+                          </button>
+                        </div>
+
+                        {attemptResultDetailState.status === 'error' ? (
+                          <p role="alert">
+                            Error cargando el detalle:{' '}
+                            {attemptResultDetailState.error}
+                          </p>
+                        ) : attemptResultDetailState.status === 'loading' ? (
+                          <p className="empty-state">Cargando detalle...</p>
+                        ) : attemptResultDetail.length === 0 ? (
+                          <p className="empty-state">
+                            El intento no tiene respuestas asignadas.
+                          </p>
+                        ) : (
+                          <ol className="result-response-list">
+                            {attemptResultDetail.map((response) => (
+                              <li key={response.response_id}>
+                                <h4>
+                                  Pregunta {response.slot_number} · Variante{' '}
+                                  {response.variant_number}
+                                </h4>
+                                <p>{response.question_statement}</p>
+                                <dl>
+                                  <div>
+                                    <dt>Respuesta</dt>
+                                    <dd>
+                                      {formatAnswerPayload(
+                                        response.answer_payload
+                                      )}
+                                    </dd>
+                                  </div>
+                                  <div>
+                                    <dt>Correcta</dt>
+                                    <dd>
+                                      {formatAnswerPayload(
+                                        response.correct_answer
+                                      )}
+                                    </dd>
+                                  </div>
+                                  <div>
+                                    <dt>Puntaje</dt>
+                                    <dd>{response.score ?? 'Pendiente'}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>Estado</dt>
+                                    <dd>
+                                      {attemptStatusLabels[
+                                        response.response_status
+                                      ] ?? response.response_status}
+                                    </dd>
+                                  </div>
+                                </dl>
+                                {response.feedback && (
+                                  <p>{response.feedback}</p>
+                                )}
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                      </div>
+                    )}
+                  </section>
+                )}
+
               {selectedCourse &&
                 isSelectedCourseOwner && (
                   <section
@@ -3804,7 +4166,42 @@ function renderAuthenticatedHeader() {
                   </button>
 
 
-
+                {liveSessionStatusError ? (
+                  <p role="alert">
+                    Error actualizando la sesión: {liveSessionStatusError}
+                  </p>
+                ) : liveSessionStatus ? (
+                  <dl className="live-session-metrics">
+                    <div>
+                      <dt>Autorizados</dt>
+                      <dd>{liveSessionStatus.authorized_participants}</dd>
+                    </div>
+                    <div>
+                      <dt>Ingresaron</dt>
+                      <dd>{liveSessionStatus.participants_entered}</dd>
+                    </div>
+                    <div>
+                      <dt>Dispositivos activos</dt>
+                      <dd>{liveSessionStatus.active_devices}</dd>
+                    </div>
+                    <div>
+                      <dt>En curso</dt>
+                      <dd>{liveSessionStatus.attempts_in_progress}</dd>
+                    </div>
+                    <div>
+                      <dt>Finalizados</dt>
+                      <dd>{liveSessionStatus.attempts_finished}</dd>
+                    </div>
+                    <div>
+                      <dt>Bloqueados</dt>
+                      <dd>{liveSessionStatus.attempts_blocked}</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <p className="empty-state">
+                    Cargando seguimiento en vivo...
+                  </p>
+                )}
 
                 <QRCodeSVG
                   value={`${window.location.origin}/?join=${encodeURIComponent(
