@@ -55,7 +55,7 @@ function App() {
 
   const [quizzes, setQuizzes] = useState([])
   const [selectedQuiz, setSelectedQuiz] = useState(null)
-  const [baseQuestions, setBaseQuestions] = useState([])
+  const [questionVariants, setQuestionVariants] = useState([])
   const [baseQuestionsLoadState, setBaseQuestionsLoadState] = useState({
     quizId: null,
     status: 'idle',
@@ -67,6 +67,13 @@ function App() {
   const [baseQuestionFormOpen, setBaseQuestionFormOpen] = useState(false)
   const [savingBaseQuestion, setSavingBaseQuestion] = useState(false)
   const [baseQuestionsMessage, setBaseQuestionsMessage] = useState('')
+  const [generatingQuestionId, setGeneratingQuestionId] = useState(null)
+  const [editingQuestionId, setEditingQuestionId] = useState(null)
+  const [questionEditDraft, setQuestionEditDraft] = useState(
+    createEmptyBaseQuestionDraft
+  )
+  const [savingQuestionId, setSavingQuestionId] = useState(null)
+  const [publishingQuiz, setPublishingQuiz] = useState(false)
 
   const [quizSession, setQuizSession] = useState(null)
   const [projectionMode, setProjectionMode] = useState(false)
@@ -122,6 +129,11 @@ function App() {
   const profileIdRef = useRef(null)
   const baseQuestionsLoadIdRef = useRef(0)
   const baseQuestionSaveRef = useRef(null)
+  const questionOperationRef = useRef(null)
+
+  const baseQuestions = questionVariants.filter(
+    ({ variant_number: variantNumber }) => variantNumber === 1
+  )
 
   const selectedQuizId = selectedQuiz?.id ?? null
   const selectedQuizCourseId = selectedQuiz?.course_id ?? null
@@ -173,8 +185,8 @@ function App() {
           points
         `)
         .eq('quiz_id', quizId)
-        .eq('variant_number', 1)
-        .order('slot_number'),
+        .order('slot_number')
+        .order('variant_number'),
       supabase
         .from('attempts')
         .select('id')
@@ -211,7 +223,7 @@ function App() {
       }
     }
 
-    setBaseQuestions(questionsResult.data ?? [])
+    setQuestionVariants(questionsResult.data ?? [])
     setBaseQuestionsLoadState({
       quizId,
       status: 'success',
@@ -298,7 +310,8 @@ function App() {
   useEffect(() => {
     baseQuestionsLoadIdRef.current += 1
     baseQuestionSaveRef.current = null
-    setBaseQuestions([])
+    questionOperationRef.current = null
+    setQuestionVariants([])
     setBaseQuestionsLoadState({
       quizId: selectedQuizId,
       status: 'idle',
@@ -308,6 +321,11 @@ function App() {
     setBaseQuestionFormOpen(false)
     setSavingBaseQuestion(false)
     setBaseQuestionsMessage('')
+    setGeneratingQuestionId(null)
+    setEditingQuestionId(null)
+    setQuestionEditDraft(createEmptyBaseQuestionDraft())
+    setSavingQuestionId(null)
+    setPublishingQuiz(false)
 
     if (
       !selectedQuizId ||
@@ -966,6 +984,7 @@ useEffect(() => {
     )
 
     const reloadResult = await loadBaseQuestions(quizIdOriginal)
+    await refreshQuizMetadata(quizIdOriginal)
 
     if (
       selectedQuizIdRef.current !== quizIdOriginal ||
@@ -992,6 +1011,247 @@ useEffect(() => {
     }
 
     setBaseQuestionsMessage(`Pregunta ${slotNumber} guardada correctamente.`)
+  }
+
+  async function handleGenerateVariants(baseQuestion) {
+    const quizIdOriginal = selectedQuiz?.id
+
+    if (
+      !quizIdOriginal ||
+      !selectedCourse ||
+      selectedCourse.teacher_id !== profile?.id ||
+      selectedQuiz.course_id !== selectedCourse.id ||
+      selectedQuizHasAttempts !== false ||
+      !['draft', 'published'].includes(selectedQuiz.status)
+    ) {
+      setBaseQuestionsMessage(
+        'Esta evaluación no está disponible para generar variantes.'
+      )
+      return
+    }
+
+    const operation = {
+      quizId: quizIdOriginal,
+      questionId: baseQuestion.id,
+    }
+
+    questionOperationRef.current = operation
+    setGeneratingQuestionId(baseQuestion.id)
+    setBaseQuestionsMessage(
+      `Generando cinco variantes para la pregunta ${baseQuestion.slot_number}...`
+    )
+
+    const { error } = await supabase.functions.invoke(
+      'generate-quiz-variants',
+      {
+        body: { baseQuestionId: baseQuestion.id },
+      }
+    )
+
+    if (
+      questionOperationRef.current !== operation ||
+      selectedQuizIdRef.current !== quizIdOriginal
+    ) {
+      return
+    }
+
+    if (error) {
+      questionOperationRef.current = null
+      setGeneratingQuestionId(null)
+      setBaseQuestionsMessage(
+        `No fue posible generar las variantes: ${error.message}`
+      )
+      return
+    }
+
+    const reloadResult = await loadBaseQuestions(quizIdOriginal)
+    await refreshQuizMetadata(quizIdOriginal)
+
+    if (
+      questionOperationRef.current !== operation ||
+      selectedQuizIdRef.current !== quizIdOriginal
+    ) {
+      return
+    }
+
+    questionOperationRef.current = null
+    setGeneratingQuestionId(null)
+
+    if (!reloadResult?.questionsLoaded) {
+      setBaseQuestionsMessage(
+        'Las variantes se generaron, pero no fue posible actualizar la lista.'
+      )
+      return
+    }
+
+    setBaseQuestionsMessage(
+      `Variantes de la pregunta ${baseQuestion.slot_number} listas para revisar.`
+    )
+  }
+
+  function handleStartQuestionEdit(question) {
+    const options = createEmptyBaseQuestionDraft().options
+
+    for (const option of question.options ?? []) {
+      if (baseQuestionOptionIds.includes(option.id)) {
+        options[option.id] = option.text ?? ''
+      }
+    }
+
+    setEditingQuestionId(question.id)
+    setQuestionEditDraft({
+      statement: question.statement ?? '',
+      options,
+      correctAnswer: question.correct_answer?.selected_option ?? '',
+    })
+    setBaseQuestionsMessage('')
+  }
+
+  async function handleSaveQuestionEdit(event, question) {
+    event.preventDefault()
+
+    const quizIdOriginal = selectedQuiz?.id
+
+    if (
+      !quizIdOriginal ||
+      editingQuestionId !== question.id ||
+      selectedQuizHasAttempts !== false ||
+      !['draft', 'published'].includes(selectedQuiz.status)
+    ) {
+      setBaseQuestionsMessage('Esta variante ya no está disponible para editar.')
+      return
+    }
+
+    const statement = questionEditDraft.statement.trim()
+    const options = baseQuestionOptionIds.map((id) => ({
+      id,
+      text: questionEditDraft.options[id].trim(),
+    }))
+
+    if (!statement) {
+      setBaseQuestionsMessage('El enunciado no puede estar vacío.')
+      return
+    }
+
+    if (options.some(({ text }) => !text)) {
+      setBaseQuestionsMessage('Completa las cuatro opciones A, B, C y D.')
+      return
+    }
+
+    if (new Set(options.map(({ text }) => text)).size !== 4) {
+      setBaseQuestionsMessage('Las opciones no pueden estar duplicadas.')
+      return
+    }
+
+    if (!baseQuestionOptionIds.includes(questionEditDraft.correctAnswer)) {
+      setBaseQuestionsMessage('Selecciona exactamente una respuesta correcta.')
+      return
+    }
+
+    const operation = {
+      quizId: quizIdOriginal,
+      questionId: question.id,
+    }
+
+    questionOperationRef.current = operation
+    setSavingQuestionId(question.id)
+    setBaseQuestionsMessage('Guardando variante...')
+
+    const { error } = await supabase
+      .from('questions')
+      .update({
+        statement,
+        options,
+        correct_answer: {
+          selected_option: questionEditDraft.correctAnswer,
+        },
+      })
+      .eq('id', question.id)
+
+    if (
+      questionOperationRef.current !== operation ||
+      selectedQuizIdRef.current !== quizIdOriginal
+    ) {
+      return
+    }
+
+    if (error) {
+      questionOperationRef.current = null
+      setSavingQuestionId(null)
+      setBaseQuestionsMessage(
+        `No fue posible guardar la variante: ${error.message}`
+      )
+      return
+    }
+
+    const reloadResult = await loadBaseQuestions(quizIdOriginal)
+    await refreshQuizMetadata(quizIdOriginal)
+
+    if (
+      questionOperationRef.current !== operation ||
+      selectedQuizIdRef.current !== quizIdOriginal
+    ) {
+      return
+    }
+
+    questionOperationRef.current = null
+    setSavingQuestionId(null)
+    setEditingQuestionId(null)
+
+    if (!reloadResult?.questionsLoaded) {
+      setBaseQuestionsMessage(
+        'La variante se guardó, pero no fue posible actualizar la lista.'
+      )
+      return
+    }
+
+    setBaseQuestionsMessage(
+      `Variante ${question.variant_number} de la pregunta ${question.slot_number} guardada.`
+    )
+  }
+
+  async function handlePublishQuiz() {
+    const quizIdOriginal = selectedQuiz?.id
+
+    if (
+      !quizIdOriginal ||
+      selectedQuiz?.status !== 'draft' ||
+      selectedQuizHasAttempts !== false
+    ) {
+      setBaseQuestionsMessage('Esta evaluación no está disponible para publicar.')
+      return
+    }
+
+    setPublishingQuiz(true)
+    setBaseQuestionsMessage('Validando seis variantes por pregunta...')
+
+    const { error } = await supabase.rpc('publish_quiz', {
+      p_quiz_id: quizIdOriginal,
+    })
+
+    if (selectedQuizIdRef.current !== quizIdOriginal) {
+      return
+    }
+
+    if (error) {
+      setPublishingQuiz(false)
+      setBaseQuestionsMessage(
+        `No fue posible publicar: ${error.message}`
+      )
+      return
+    }
+
+    const refreshedQuiz = await refreshQuizMetadata(quizIdOriginal)
+    setPublishingQuiz(false)
+
+    if (!refreshedQuiz) {
+      setBaseQuestionsMessage(
+        'La evaluación se publicó, pero no fue posible actualizar su estado en pantalla.'
+      )
+      return
+    }
+
+    setBaseQuestionsMessage('Evaluación publicada y lista para abrir por QR ✅')
   }
 
   async function loadQuizMetadata(quizId) {
@@ -1025,6 +1285,20 @@ useEffect(() => {
     setSelectedQuiz(data)
 
     return data
+  }
+
+  async function refreshQuizMetadata(quizId) {
+    const quiz = await loadQuizMetadata(quizId)
+
+    if (quiz) {
+      setQuizzes((currentQuizzes) =>
+        currentQuizzes.map((currentQuiz) =>
+          currentQuiz.id === quiz.id ? quiz : currentQuiz
+        )
+      )
+    }
+
+    return quiz
   }
 
 async function loadAttemptDeadline(attemptId) {
@@ -2471,6 +2745,22 @@ function renderAuthenticatedHeader() {
         ? baseQuestionsLoadState.status
         : 'idle'
 
+    const questionGroups = baseQuestions.map((baseQuestion) => ({
+      baseQuestion,
+      variants: questionVariants.filter(
+        ({ slot_number: slotNumber }) =>
+          slotNumber === baseQuestion.slot_number
+      ),
+    }))
+    const completeQuestionGroups = questionGroups.filter(
+      ({ variants }) =>
+        variants.length === 6 &&
+        variants.every(
+          ({ variant_number: variantNumber }, index) =>
+            variantNumber === index + 1
+        )
+    ).length
+
     const baseQuestionsSummary =
       selectedBaseQuestionsLoadStatus === 'loading'
         ? 'Cargando preguntas...'
@@ -2479,7 +2769,7 @@ function renderAuthenticatedHeader() {
               baseQuestions.length === 1
                 ? 'pregunta base'
                 : 'preguntas base'
-            }`
+            } · ${completeQuestionGroups}/${baseQuestions.length} con seis variantes`
           : selectedBaseQuestionsLoadStatus === 'error'
             ? 'Preguntas no disponibles'
             : 'Preguntas pendientes de carga'
@@ -2910,6 +3200,24 @@ function renderAuthenticatedHeader() {
                       )}
 
                       {isSelectedEvaluationOwner &&
+                        selectedQuiz.status === 'draft' && (
+                          <button
+                            type="button"
+                            onClick={handlePublishQuiz}
+                            disabled={
+                              !isSelectedEvaluationEditable ||
+                              publishingQuiz ||
+                              generatingQuestionId !== null ||
+                              savingQuestionId !== null
+                            }
+                          >
+                            {publishingQuiz
+                              ? 'Publicando...'
+                              : 'Publicar evaluación'}
+                          </button>
+                        )}
+
+                      {isSelectedEvaluationOwner &&
                         selectedQuiz.delivery_mode === 'in_person' &&
                         selectedQuiz.status === 'published' && (
                           <button
@@ -3084,25 +3392,186 @@ function renderAuthenticatedHeader() {
                       </p>
                     ) : selectedBaseQuestionsLoadStatus === 'success' ? (
                       <ol className="base-question-list">
-                        {baseQuestions.map((question) => (
-                          <li key={question.id}>
-                            <h3>Pregunta {question.slot_number}</h3>
-                            <p>{question.statement}</p>
+                        {questionGroups.map(({ baseQuestion, variants }) => (
+                          <li key={baseQuestion.id}>
+                            <h3>Pregunta {baseQuestion.slot_number}</h3>
+                            <p>
+                              {variants.length}/6 variantes preparadas
+                            </p>
 
-                            {question.question_type === 'multiple_choice' &&
-                              Array.isArray(question.options) && (
-                                <ul className="base-question-options">
-                                  {question.options.map((option) => (
-                                    <li key={option.id}>
-                                      <strong>{option.id}.</strong>{' '}
-                                      {option.text}
-                                      {question.correct_answer?.selected_option ===
-                                        option.id && (
-                                        <span> (correcta)</span>
+                            {variants.map((question) => (
+                              <article
+                                className="question-variant"
+                                key={question.id}
+                              >
+                                <h4>
+                                  {question.variant_number === 1
+                                    ? 'Pregunta base'
+                                    : `Variante ${question.variant_number}`}
+                                </h4>
+
+                                {editingQuestionId === question.id ? (
+                                  <form
+                                    className="base-question-form"
+                                    onSubmit={(event) =>
+                                      handleSaveQuestionEdit(event, question)
+                                    }
+                                  >
+                                    <label>
+                                      Enunciado
+                                      <textarea
+                                        value={questionEditDraft.statement}
+                                        onChange={(event) =>
+                                          setQuestionEditDraft((draft) => ({
+                                            ...draft,
+                                            statement: event.target.value,
+                                          }))
+                                        }
+                                        rows="4"
+                                        disabled={savingQuestionId === question.id}
+                                      />
+                                    </label>
+
+                                    {baseQuestionOptionIds.map((optionId) => (
+                                      <label key={optionId}>
+                                        Opción {optionId}
+                                        <input
+                                          type="text"
+                                          value={
+                                            questionEditDraft.options[optionId]
+                                          }
+                                          onChange={(event) =>
+                                            setQuestionEditDraft((draft) => ({
+                                              ...draft,
+                                              options: {
+                                                ...draft.options,
+                                                [optionId]: event.target.value,
+                                              },
+                                            }))
+                                          }
+                                          disabled={
+                                            savingQuestionId === question.id
+                                          }
+                                        />
+                                      </label>
+                                    ))}
+
+                                    <fieldset>
+                                      <legend>Respuesta correcta</legend>
+                                      <div className="correct-answer-options">
+                                        {baseQuestionOptionIds.map((optionId) => (
+                                          <label key={optionId}>
+                                            <input
+                                              type="radio"
+                                              name={`question-correct-${question.id}`}
+                                              value={optionId}
+                                              checked={
+                                                questionEditDraft.correctAnswer ===
+                                                optionId
+                                              }
+                                              onChange={() =>
+                                                setQuestionEditDraft((draft) => ({
+                                                  ...draft,
+                                                  correctAnswer: optionId,
+                                                }))
+                                              }
+                                              disabled={
+                                                savingQuestionId === question.id
+                                              }
+                                            />
+                                            {optionId}
+                                          </label>
+                                        ))}
+                                      </div>
+                                    </fieldset>
+
+                                    <div className="question-form-actions">
+                                      <button
+                                        type="submit"
+                                        disabled={
+                                          savingQuestionId === question.id
+                                        }
+                                      >
+                                        {savingQuestionId === question.id
+                                          ? 'Guardando...'
+                                          : 'Guardar cambios'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingQuestionId(null)
+                                          setQuestionEditDraft(
+                                            createEmptyBaseQuestionDraft()
+                                          )
+                                          setBaseQuestionsMessage('')
+                                        }}
+                                        disabled={
+                                          savingQuestionId === question.id
+                                        }
+                                      >
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  </form>
+                                ) : (
+                                  <>
+                                    <p>{question.statement}</p>
+
+                                    {question.question_type ===
+                                      'multiple_choice' &&
+                                      Array.isArray(question.options) && (
+                                        <ul className="base-question-options">
+                                          {question.options.map((option) => (
+                                            <li key={option.id}>
+                                              <strong>{option.id}.</strong>{' '}
+                                              {option.text}
+                                              {question.correct_answer
+                                                ?.selected_option ===
+                                                option.id && (
+                                                <span> (correcta)</span>
+                                              )}
+                                            </li>
+                                          ))}
+                                        </ul>
                                       )}
-                                    </li>
-                                  ))}
-                                </ul>
+
+                                    {isSelectedEvaluationEditable && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleStartQuestionEdit(question)
+                                        }
+                                        disabled={
+                                          generatingQuestionId !== null ||
+                                          savingQuestionId !== null ||
+                                          publishingQuiz
+                                        }
+                                      >
+                                        Editar variante
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                              </article>
+                            ))}
+
+                            {isSelectedEvaluationEditable &&
+                              variants.length === 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleGenerateVariants(baseQuestion)
+                                  }
+                                  disabled={
+                                    generatingQuestionId !== null ||
+                                    savingQuestionId !== null ||
+                                    publishingQuiz
+                                  }
+                                >
+                                  {generatingQuestionId === baseQuestion.id
+                                    ? 'Generando 5 variantes...'
+                                    : 'Generar variantes'}
+                                </button>
                               )}
                           </li>
                         ))}
