@@ -1,16 +1,46 @@
-# React + Vite
+# QuIzA
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+## Pruebas de integración V1.1
 
-Currently, two official plugins are available:
+### Requisitos
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Node.js `>=22.13.0 <23`. La versión reproducible usada por el proyecto está en `.nvmrc` (`22.22.0`).
+- npm 10, incluido con Node.js 22.
+- Docker con el daemon en ejecución.
+- Supabase CLI `2.118.0`. Se instala localmente y queda fijado por `package-lock.json`; no se requiere una instalación global.
 
-## React Compiler
+### Instalación limpia
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+git clone <repositorio>
+cd 01_QuIzA
+nvm install
+nvm use
+npm ci
+npm test
+```
 
-## Expanding the Oxlint configuration
+`npm test` no utiliza el proyecto Supabase habitual. El runner:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+1. crea un directorio temporal y un `project_id` aleatorio con prefijo `quiza_ephemeral_`;
+2. reserva puertos locales diferentes de los declarados en `supabase/config.toml`;
+3. copia todas las migraciones existentes y construye una base nueva desde cero;
+4. obtiene URL y claves locales mediante `supabase status -o env`;
+5. ejecuta Vitest únicamente si la URL, el puerto y la marca efímera coinciden;
+6. destruye ese proyecto con `supabase stop --project-id ... --no-backup`.
+
+El runner no copia metadatos de enlace remoto ni archivos de `supabase/.temp`. También compara antes y después la identidad y fecha de inicio de los contenedores del proyecto Supabase configurado en el repositorio. Si alguna comprobación de aislamiento falla, las pruebas se abortan.
+
+No se debe ejecutar `vitest` directamente: los helpers rechazan cualquier entorno que no haya sido creado por el runner efímero.
+
+### Comandos
+
+```bash
+npm test
+npm run test:coverage
+npm audit
+npm run lint
+npm run build
+```
+
+Los fixtures crean seis variantes por slot y conservan la variante 1 como asignación determinista. Los datos no se eliminan fila por fila: desaparecen al destruir la base efímera completa, sin desactivar triggers ni políticas.
