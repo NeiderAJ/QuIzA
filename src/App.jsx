@@ -3045,7 +3045,7 @@ function renderAuthenticatedHeader() {
                       }}
                       disabled={savingBaseQuestion}
                     >
-                      Agregar pregunta
+                      Agregar pregunta manual
                     </button>
                   )}
                     </div>
