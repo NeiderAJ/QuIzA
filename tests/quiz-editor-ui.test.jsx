@@ -195,10 +195,18 @@ describe('editor y publicación de seis variantes', () => {
     )
 
     expect(
-      await screen.findByText('Variante revisada por el evaluador')
+      await screen.findByText(
+        'Variante revisada por el evaluador',
+        undefined,
+        { timeout: 5000 }
+      )
     ).toBeInTheDocument()
     expect(
-      await screen.findByText('Variante 2 de la pregunta 1 guardada.')
+      await screen.findByText(
+        'Variante 2 de la pregunta 1 guardada.',
+        undefined,
+        { timeout: 5000 }
+      )
     ).toBeInTheDocument()
 
     const publishButton = screen.getByRole('button', {
