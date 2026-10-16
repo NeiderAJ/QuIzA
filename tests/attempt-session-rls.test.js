@@ -89,6 +89,25 @@ describe('aislamiento de lectura por sesión del intento', () => {
 
       expect(foreignQuestion.error).not.toBeNull()
 
+      const [foreignAnswer, foreignHeartbeat, foreignIntegrityEvent] =
+        await Promise.all([
+          secondSession.student.rpc('submit_response', {
+            p_response_id: fixture.assignedResponseId,
+            p_answer_payload: { selected_option: 'A' },
+          }),
+          secondSession.student.rpc('heartbeat_quiz_attempt', {
+            p_attempt_id: fixture.attemptId,
+          }),
+          secondSession.student.rpc('replace_question_on_focus_loss', {
+            p_attempt_id: fixture.attemptId,
+            p_event_type: 'visibility_hidden',
+          }),
+        ])
+
+      expect(foreignAnswer.error).not.toBeNull()
+      expect(foreignHeartbeat.error).not.toBeNull()
+      expect(foreignIntegrityEvent.error).not.toBeNull()
+
       const answer = await context.student.rpc('submit_response', {
         p_response_id: fixture.assignedResponseId,
         p_answer_payload: { selected_option: 'A' },
