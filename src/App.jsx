@@ -1137,6 +1137,107 @@ async function loadAttemptDeadline(attemptId) {
   return data.deadline_at
 }
 
+async function handleExpiredAttempt(
+  attemptId,
+  persistedAttempt = null
+) {
+  if (!attemptId) {
+    return false
+  }
+
+  /*
+   * La expiración siempre llega desde PostgreSQL.
+   * React solamente cierra el estado local y recupera
+   * la calificación que el backend ya persistió.
+   */
+  setCurrentQuestion(null)
+  setSelectedAnswer('')
+  setActiveAttempt(null)
+  setIntegrityAlert(null)
+  setSubmittingAnswer(false)
+  clearStoredAttempt()
+
+  setAttemptResult({
+    status: 'expired',
+    score_points: null,
+    grade: null,
+    details_status: 'loading',
+  })
+
+  const hasPersistedResult =
+    persistedAttempt?.status === 'expired' &&
+    Object.prototype.hasOwnProperty.call(
+      persistedAttempt,
+      'score_points'
+    ) &&
+    Object.prototype.hasOwnProperty.call(
+      persistedAttempt,
+      'grade'
+    )
+
+  let attempt = hasPersistedResult
+    ? persistedAttempt
+    : null
+
+  if (!attempt) {
+    const { data, error } = await supabase
+      .from('attempts')
+      .select(`
+        id,
+        status,
+        score_points,
+        grade
+      `)
+      .eq('id', attemptId)
+      .single()
+
+    if (error) {
+      setAttemptResult({
+        status: 'expired',
+        score_points: null,
+        grade: null,
+        details_status: 'error',
+      })
+
+      setMessage(
+        'El tiempo disponible terminó, pero no fue posible recuperar la calificación persistida.'
+      )
+
+      return false
+    }
+
+    attempt = data
+  }
+
+  if (attempt?.status !== 'expired') {
+    setAttemptResult({
+      status: 'expired',
+      score_points: null,
+      grade: null,
+      details_status: 'error',
+    })
+
+    setMessage(
+      'El backend no confirmó el resultado vencido de la evaluación.'
+    )
+
+    return false
+  }
+
+  setAttemptResult({
+    status: 'expired',
+    score_points: attempt.score_points,
+    grade: attempt.grade,
+    details_status: 'loaded',
+  })
+
+  setMessage(
+    'El tiempo disponible para esta evaluación terminó.'
+  )
+
+  return true
+}
+
 /************************************++    *********** */
 
 async function restoreStoredAttempt() {
@@ -1161,7 +1262,9 @@ async function restoreStoredAttempt() {
     .select(`
       id,
       quiz_id,
-      status
+      status,
+      score_points,
+      grade
     `)
     .eq('id', storedAttemptId)
     .single()
@@ -1178,6 +1281,13 @@ async function restoreStoredAttempt() {
    * Solo restauramos intentos
    * que realmente siguen en progreso.
    */
+  if (attempt.status === 'expired') {
+    await loadQuizMetadata(attempt.quiz_id)
+    await handleExpiredAttempt(attempt.id, attempt)
+
+    return false
+  }
+
   if (attempt.status !== 'in_progress') {
     sessionStorage.removeItem(
       'quiza_active_attempt_id'
@@ -1473,21 +1583,12 @@ if (!question) {
     error: attemptError,
   } = await supabase
     .from('attempts')
-    .select('status')
+    .select('status, score_points, grade')
     .eq('id', attemptId)
     .single()
 
   if (!attemptError && attempt?.status === 'expired') {
-    setCurrentQuestion(null)
-    setSelectedAnswer('')
-
-    setAttemptResult({
-      status: 'expired',
-    })
-
-    setMessage(
-      'El tiempo disponible para esta evaluación terminó.'
-    )
+    await handleExpiredAttempt(attemptId, attempt)
 
     return false
   }
@@ -1557,17 +1658,8 @@ if (!question) {
       if (
             replacement.attempt_status === 'expired'
           ) {
-            setCurrentQuestion(null)
-            setSelectedAnswer('')
-
-            setAttemptResult({
-              status: 'expired',
-            })
-
-            setIntegrityAlert(null)
-
-            setMessage(
-              'El tiempo disponible para esta evaluación terminó.'
+            await handleExpiredAttempt(
+              activeAttempt.attempt_id
             )
 
             return true
@@ -1724,21 +1816,12 @@ if (!question) {
 
 
     if (result.status === 'expired') {
-  setCurrentQuestion(null)
-  setSelectedAnswer('')
+      await handleExpiredAttempt(
+        activeAttempt.attempt_id
+      )
 
-  setAttemptResult({
-    status: 'expired',
-  })
-
-  setMessage(
-    'El tiempo disponible para esta evaluación terminó.'
-  )
-
-  setSubmittingAnswer(false)
-
-  return
-  }
+      return
+    }
 
     /*
      * Si quedan slots,
@@ -1823,6 +1906,15 @@ if (!question) {
       return
     }
 
+    if (finalAttempt.status === 'expired') {
+      await handleExpiredAttempt(
+        activeAttempt.attempt_id,
+        finalAttempt
+      )
+
+      return
+    }
+
     setCurrentQuestion(null)
     setSelectedAnswer('')
 
@@ -1899,23 +1991,7 @@ async function refreshAttemptStatus(attemptId) {
   }
 
   if (data.status === 'expired') {
-    setCurrentQuestion(null)
-    setSelectedAnswer('')
-    setIntegrityAlert(null)
-
-    setAttemptResult({
-      status: 'expired',
-      score_points: data.score_points,
-      grade: data.grade,
-    })
-
-    setMessage(
-      'El tiempo disponible para esta evaluación terminó.'
-    )
-
-      clearStoredAttempt()
-
-
+    await handleExpiredAttempt(attemptId, data)
   }
 
   return data
@@ -3417,17 +3493,35 @@ function renderAuthenticatedHeader() {
                       Ya no es posible enviar respuestas.
                     </p>
 
-                    <p>
-                      <strong>Nota:</strong>{' '}
-                      {attemptResult.grade ?? 0}
-                      {' / '}
-                      {selectedQuiz?.grade_scale_max ?? 5}
-                    </p>
+                    {attemptResult.details_status === 'loading' ? (
+                      <p>Recuperando la calificación...</p>
+                    ) : attemptResult.details_status === 'error' ? (
+                      <p>
+                        No fue posible recuperar la calificación
+                        persistida. Intenta recargar la página.
+                      </p>
+                    ) : attemptResult.grade === null ||
+                      attemptResult.grade === undefined ||
+                      attemptResult.score_points === null ||
+                      attemptResult.score_points === undefined ? (
+                      <p>
+                        La calificación todavía no está disponible.
+                      </p>
+                    ) : (
+                      <>
+                        <p>
+                          <strong>Nota:</strong>{' '}
+                          {attemptResult.grade}
+                          {' / '}
+                          {selectedQuiz?.grade_scale_max ?? 5}
+                        </p>
 
-                    <p>
-                      <strong>Puntos obtenidos:</strong>{' '}
-                      {attemptResult.score_points ?? 0}
-                    </p>
+                        <p>
+                          <strong>Puntos obtenidos:</strong>{' '}
+                          {attemptResult.score_points}
+                        </p>
+                      </>
+                    )}
                   </>
                 ) : (
               <p>
