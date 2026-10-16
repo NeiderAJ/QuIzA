@@ -220,6 +220,13 @@ function App() {
   const [savingQuestionId, setSavingQuestionId] = useState(null)
   const [publishingQuiz, setPublishingQuiz] = useState(false)
   const [duplicatingQuiz, setDuplicatingQuiz] = useState(false)
+  const [editingQuizDetails, setEditingQuizDetails] = useState(false)
+  const [quizDetailsDraft, setQuizDetailsDraft] = useState({
+    title: '',
+    instructions: '',
+    durationMinutes: '',
+  })
+  const [savingQuizDetails, setSavingQuizDetails] = useState(false)
 
   const [quizSession, setQuizSession] = useState(null)
   const [liveSessionStatus, setLiveSessionStatus] = useState(null)
@@ -544,6 +551,13 @@ function App() {
     setSavingQuestionId(null)
     setPublishingQuiz(false)
     setDuplicatingQuiz(false)
+    setEditingQuizDetails(false)
+    setQuizDetailsDraft({
+      title: '',
+      instructions: '',
+      durationMinutes: '',
+    })
+    setSavingQuizDetails(false)
     quizResultsLoadIdRef.current += 1
     attemptResultDetailLoadIdRef.current += 1
     setQuizResults([])
@@ -1497,6 +1511,86 @@ useEffect(() => {
     setBaseQuestionsMessage(
       `Variante ${question.variant_number} de la pregunta ${question.slot_number} guardada.`
     )
+  }
+
+  function handleStartQuizDetailsEdit() {
+    if (!selectedQuiz || selectedQuizHasAttempts !== false) {
+      return
+    }
+
+    setQuizDetailsDraft({
+      title: selectedQuiz.title,
+      instructions: selectedQuiz.instructions ?? '',
+      durationMinutes: String(selectedQuiz.duration_minutes ?? ''),
+    })
+    setEditingQuizDetails(true)
+    setMessage('')
+  }
+
+  async function handleSaveQuizDetails(event) {
+    event.preventDefault()
+
+    const quizId = selectedQuiz?.id
+    const title = quizDetailsDraft.title.trim()
+    const instructions = quizDetailsDraft.instructions.trim()
+    const durationMinutes = Number(quizDetailsDraft.durationMinutes)
+
+    if (
+      !quizId ||
+      selectedQuizHasAttempts !== false ||
+      !title ||
+      !Number.isInteger(durationMinutes) ||
+      durationMinutes <= 0
+    ) {
+      setMessage('Define un título y una duración válida en minutos.')
+      return
+    }
+
+    setSavingQuizDetails(true)
+    setMessage('Guardando datos de la evaluación...')
+
+    const { data, error } = await supabase
+      .from('quizzes')
+      .update({
+        title,
+        instructions: instructions || null,
+        duration_minutes: durationMinutes,
+      })
+      .eq('id', quizId)
+      .select(`
+        id,
+        course_id,
+        title,
+        instructions,
+        status,
+        delivery_mode,
+        opens_at,
+        closes_at,
+        duration_minutes,
+        grade_scale_max,
+        number_of_slots,
+        variants_per_slot,
+        max_focus_violations
+      `)
+      .single()
+
+    if (selectedQuizIdRef.current !== quizId) {
+      return
+    }
+
+    setSavingQuizDetails(false)
+
+    if (error) {
+      setMessage(`No fue posible guardar la evaluación: ${error.message}`)
+      return
+    }
+
+    setSelectedQuiz(data)
+    setQuizzes((currentQuizzes) =>
+      currentQuizzes.map((quiz) => (quiz.id === data.id ? data : quiz))
+    )
+    setEditingQuizDetails(false)
+    setMessage('Datos de la evaluación actualizados ✅')
   }
 
   async function handlePublishQuiz() {
@@ -3531,6 +3625,11 @@ function renderAuthenticatedHeader() {
       selectedBaseQuestionsLoadStatus === 'success' &&
       selectedQuizHasAttempts === false
 
+    const canEditSelectedQuizDetails =
+      isSelectedEvaluationOwner &&
+      ['draft', 'published'].includes(selectedQuiz?.status) &&
+      selectedQuizHasAttempts === false
+
     const latestAttemptNumberByStudent = quizResults.reduce(
       (latestAttempts, result) => {
         const currentLatest =
@@ -4156,6 +4255,93 @@ function renderAuthenticatedHeader() {
                         </p>
                       )}
 
+                      {canEditSelectedQuizDetails &&
+                        !editingQuizDetails && (
+                          <button
+                            type="button"
+                            onClick={handleStartQuizDetailsEdit}
+                          >
+                            Editar datos
+                          </button>
+                        )}
+
+                      {canEditSelectedQuizDetails && editingQuizDetails && (
+                        <form
+                          className="quiz-details-form"
+                          onSubmit={handleSaveQuizDetails}
+                        >
+                          <label>
+                            Título
+                            <input
+                              type="text"
+                              value={quizDetailsDraft.title}
+                              onChange={(event) =>
+                                setQuizDetailsDraft((draft) => ({
+                                  ...draft,
+                                  title: event.target.value,
+                                }))
+                              }
+                              required
+                              disabled={savingQuizDetails}
+                            />
+                          </label>
+
+                          <label>
+                            Duración en minutos
+                            <input
+                              type="number"
+                              min="1"
+                              step="1"
+                              value={quizDetailsDraft.durationMinutes}
+                              onChange={(event) =>
+                                setQuizDetailsDraft((draft) => ({
+                                  ...draft,
+                                  durationMinutes: event.target.value,
+                                }))
+                              }
+                              required
+                              disabled={savingQuizDetails}
+                            />
+                          </label>
+
+                          <label>
+                            Instrucciones (opcional)
+                            <textarea
+                              value={quizDetailsDraft.instructions}
+                              onChange={(event) =>
+                                setQuizDetailsDraft((draft) => ({
+                                  ...draft,
+                                  instructions: event.target.value,
+                                }))
+                              }
+                              rows="3"
+                              disabled={savingQuizDetails}
+                            />
+                          </label>
+
+                          <div className="question-form-actions">
+                            <button
+                              type="submit"
+                              disabled={savingQuizDetails}
+                            >
+                              {savingQuizDetails
+                                ? 'Guardando...'
+                                : 'Guardar datos'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingQuizDetails(false)
+                                setMessage('')
+                              }}
+                              disabled={savingQuizDetails}
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </form>
+                      )}
+
                       {isSelectedEvaluationOwner &&
                         selectedQuiz.status === 'draft' && (
                           <button
@@ -4165,7 +4351,8 @@ function renderAuthenticatedHeader() {
                               !isSelectedEvaluationEditable ||
                               publishingQuiz ||
                               generatingQuestionId !== null ||
-                              savingQuestionId !== null
+                              savingQuestionId !== null ||
+                              editingQuizDetails
                             }
                           >
                             {publishingQuiz

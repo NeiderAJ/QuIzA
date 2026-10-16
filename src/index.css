@@ -363,6 +363,35 @@ section > button + button:hover:not(:disabled) {
   font-size: 0.92rem;
 }
 
+.quiz-details-form {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--soft);
+}
+
+.quiz-details-form label {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--text-700);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.quiz-details-form label:first-child {
+  margin-top: 0;
+}
+
+.quiz-details-form textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #cfd6cd;
+  border-radius: 9px;
+  resize: vertical;
+}
+
 .participants-section {
   width: min(100%, 680px);
   margin-top: 36px;
