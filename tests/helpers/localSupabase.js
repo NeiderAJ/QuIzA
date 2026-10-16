@@ -124,6 +124,21 @@ export async function createLocalTestContext() {
     },
   })
 
+  const teacher = createClient(url, anonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  })
+
+  const { error: teacherSignInError } =
+    await teacher.auth.signInWithPassword({
+      email: teacherEmail,
+      password,
+    })
+
+  assertSuccess(teacherSignInError, 'Autenticar docente de prueba')
+
   const { data: signInData, error: signInError } =
     await student.auth.signInWithPassword({
       email: studentEmail,
@@ -142,11 +157,61 @@ export async function createLocalTestContext() {
     url,
     anonKey,
     service,
+    teacher,
     student,
     teacherId,
     studentId,
     courseId: course.id,
     sessionId: jwtPayload.session_id,
+  }
+}
+
+export async function createQuizWithVariants(
+  context,
+  {
+    numberOfSlots = 1,
+    status = 'draft',
+  } = {}
+) {
+  const quizId = randomUUID()
+
+  const { error: quizError } = await context.service
+    .from('quizzes')
+    .insert({
+      id: quizId,
+      course_id: context.courseId,
+      created_by: context.teacherId,
+      title: `Evaluación variantes ${quizId}`,
+      status,
+      duration_minutes: 10,
+      grade_scale_max: 5,
+      number_of_slots: numberOfSlots,
+      variants_per_slot: 6,
+      max_focus_violations: 5,
+      delivery_mode: 'in_person',
+      published_at: status === 'published' ? new Date().toISOString() : null,
+    })
+
+  assertSuccess(quizError, 'Crear evaluación con variantes')
+
+  const { data: questions, error: questionsError } = await context.service
+    .from('questions')
+    .insert(
+      Array.from({ length: numberOfSlots }, (_, index) =>
+        Array.from({ length: 6 }, (_, variantIndex) =>
+          buildQuestion(quizId, index + 1, variantIndex + 1)
+        )
+      ).flat()
+    )
+    .select('id, slot_number, variant_number')
+    .order('slot_number')
+    .order('variant_number')
+
+  assertSuccess(questionsError, 'Crear seis variantes por slot')
+
+  return {
+    quizId,
+    questions,
   }
 }
 
@@ -333,5 +398,6 @@ export async function cleanupLocalTestContext(context) {
     return
   }
 
+  await context.teacher.auth.signOut()
   await context.student.auth.signOut()
 }
