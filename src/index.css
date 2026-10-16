@@ -443,6 +443,38 @@ section > button + button:hover:not(:disabled) {
   border-top: 1px solid var(--line);
 }
 
+.new-attempt-form {
+  width: min(100%, 620px);
+  margin-top: 24px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--soft);
+}
+
+.new-attempt-form h3,
+.new-attempt-form p {
+  margin-top: 0;
+}
+
+.new-attempt-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-700);
+  font-size: 0.92rem;
+  font-weight: 650;
+}
+
+.new-attempt-form textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #cfd6cd;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--text-900);
+  resize: vertical;
+}
+
 .result-response-list {
   display: grid;
   gap: 16px;

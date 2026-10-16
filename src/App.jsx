@@ -108,6 +108,11 @@ function App() {
     status: 'idle',
     error: '',
   })
+  const [authorizingAttemptId, setAuthorizingAttemptId] = useState(null)
+  const [newAttemptReason, setNewAttemptReason] = useState('')
+  const [authorizingNewAttempt, setAuthorizingNewAttempt] = useState(false)
+  const [newAttemptAuthorizationMessage, setNewAttemptAuthorizationMessage] =
+    useState('')
   const [projectionMode, setProjectionMode] = useState(false)
 
   const [joinToken, setJoinToken] = useState(null)
@@ -376,6 +381,10 @@ function App() {
       status: 'idle',
       error: '',
     })
+    setAuthorizingAttemptId(null)
+    setNewAttemptReason('')
+    setAuthorizingNewAttempt(false)
+    setNewAttemptAuthorizationMessage('')
 
     if (
       !selectedQuizId ||
@@ -2846,6 +2855,49 @@ useEffect(() => {
     })
   }
 
+  async function handleAuthorizeNewAttempt(event) {
+    event.preventDefault()
+
+    const attemptId = authorizingAttemptId
+
+    if (!attemptId || authorizingNewAttempt) {
+      return
+    }
+
+    setAuthorizingNewAttempt(true)
+    setNewAttemptAuthorizationMessage('')
+
+    const { error } = await supabase.rpc('authorize_new_attempt', {
+      p_previous_attempt_id: attemptId,
+      p_reason: newAttemptReason.trim() || null,
+    })
+
+    if (error) {
+      setAuthorizingNewAttempt(false)
+      setNewAttemptAuthorizationMessage(
+        `No fue posible autorizar el nuevo intento: ${error.message}`
+      )
+      return
+    }
+
+    const refreshed = await loadQuizResults(selectedQuizIdRef.current)
+
+    setAuthorizingNewAttempt(false)
+
+    if (!refreshed) {
+      setNewAttemptAuthorizationMessage(
+        'El intento fue autorizado, pero no fue posible actualizar los resultados.'
+      )
+      return
+    }
+
+    setAuthorizingAttemptId(null)
+    setNewAttemptReason('')
+    setNewAttemptAuthorizationMessage(
+      'Nuevo intento autorizado. La autorización se consumirá en el próximo ingreso por QRR.'
+    )
+  }
+
   async function handleCreateQuizSession() {
     if (!selectedQuiz) {
       return
@@ -3011,6 +3063,20 @@ function renderAuthenticatedHeader() {
       ['draft', 'published'].includes(selectedQuiz?.status) &&
       selectedBaseQuestionsLoadStatus === 'success' &&
       selectedQuizHasAttempts === false
+
+    const latestAttemptNumberByStudent = quizResults.reduce(
+      (latestAttempts, result) => {
+        const currentLatest =
+          latestAttempts.get(result.student_id) ?? 0
+
+        if (result.attempt_number > currentLatest) {
+          latestAttempts.set(result.student_id, result.attempt_number)
+        }
+
+        return latestAttempts
+      },
+      new Map()
+    )
 
         if (
   isSelectedEvaluationOwner &&
@@ -3897,11 +3963,13 @@ function renderAuthenticatedHeader() {
                           <thead>
                             <tr>
                               <th>Participante</th>
+                              <th>Intento</th>
                               <th>Estado</th>
                               <th>Puntaje</th>
                               <th>Nota</th>
                               <th>Incidencias</th>
                               <th>Detalle</th>
+                              <th>Nuevo intento</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -3911,6 +3979,7 @@ function renderAuthenticatedHeader() {
                                   <strong>{result.student_name}</strong>
                                   <small>{result.student_email}</small>
                                 </td>
+                                <td>{result.attempt_number}</td>
                                 <td>
                                   {attemptStatusLabels[
                                     result.attempt_status
@@ -3944,11 +4013,92 @@ function renderAuthenticatedHeader() {
                                       : 'Ver detalle'}
                                   </button>
                                 </td>
+                                <td>
+                                  {result.new_attempt_authorization_pending ? (
+                                    <span>Autorizado</span>
+                                  ) : result.attempt_number ===
+                                      latestAttemptNumberByStudent.get(
+                                        result.student_id
+                                      ) &&
+                                    [
+                                      'submitted',
+                                      'graded',
+                                      'expired',
+                                      'blocked',
+                                    ].includes(result.attempt_status) ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setAuthorizingAttemptId(
+                                          result.attempt_id
+                                        )
+                                        setNewAttemptReason('')
+                                        setNewAttemptAuthorizationMessage('')
+                                      }}
+                                      disabled={authorizingNewAttempt}
+                                    >
+                                      Autorizar nuevo intento
+                                    </button>
+                                  ) : (
+                                    <span>—</span>
+                                  )}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       </div>
+                    )}
+
+                    {authorizingAttemptId && (
+                      <form
+                        className="new-attempt-form"
+                        onSubmit={handleAuthorizeNewAttempt}
+                      >
+                        <h3>Confirmar nuevo intento</h3>
+                        <p>
+                          Se conservará el historial anterior y la autorización
+                          solo podrá usarse una vez.
+                        </p>
+                        <label>
+                          Motivo (opcional)
+                          <textarea
+                            value={newAttemptReason}
+                            onChange={(event) =>
+                              setNewAttemptReason(event.target.value)
+                            }
+                            rows="3"
+                            disabled={authorizingNewAttempt}
+                          />
+                        </label>
+                        <div className="question-form-actions">
+                          <button
+                            type="submit"
+                            disabled={authorizingNewAttempt}
+                          >
+                            {authorizingNewAttempt
+                              ? 'Autorizando...'
+                              : 'Confirmar autorización'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAuthorizingAttemptId(null)
+                              setNewAttemptReason('')
+                              setNewAttemptAuthorizationMessage('')
+                            }}
+                            disabled={authorizingNewAttempt}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {newAttemptAuthorizationMessage && (
+                      <p role="status">
+                        {newAttemptAuthorizationMessage}
+                      </p>
                     )}
 
                     {selectedResultAttemptId && (
