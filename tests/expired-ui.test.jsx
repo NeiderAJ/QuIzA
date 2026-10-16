@@ -237,4 +237,50 @@ describe('expired en la interfaz', () => {
     expectRenderedResult(persisted)
     expect(screen.queryByText('Tiempo agotado.')).not.toBeInTheDocument()
   })
+
+  it('restaura un intento tras F5 sin registrar incidencia ni cambiar pregunta', async () => {
+    const fixture = await createAttemptFixture(context, {
+      numberOfSlots: 1,
+      expiredDeadline: false,
+    })
+    const { data: attemptBefore, error: attemptBeforeError } =
+      await context.service
+        .from('attempts')
+        .select('current_question_id, focus_violation_count')
+        .eq('id', fixture.attemptId)
+        .single()
+
+    expect(attemptBeforeError).toBeNull()
+
+    const navigationSpy = vi
+      .spyOn(performance, 'getEntriesByType')
+      .mockReturnValue([{ type: 'reload' }])
+
+    try {
+      await renderActiveAttempt(fixture, 1, 1)
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))
+
+      const [attemptAfter, focusEvents] = await Promise.all([
+        context.service
+          .from('attempts')
+          .select('current_question_id, focus_violation_count')
+          .eq('id', fixture.attemptId)
+          .single(),
+        context.service
+          .from('focus_events')
+          .select('id')
+          .eq('attempt_id', fixture.attemptId),
+      ])
+
+      expect(attemptAfter.error).toBeNull()
+      expect(attemptAfter.data).toEqual(attemptBefore)
+      expect(focusEvents.error).toBeNull()
+      expect(focusEvents.data).toEqual([])
+      expect(
+        screen.queryByText(/Incidencia de integridad/i)
+      ).not.toBeInTheDocument()
+    } finally {
+      navigationSpy.mockRestore()
+    }
+  })
 })

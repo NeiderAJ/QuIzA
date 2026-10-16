@@ -110,14 +110,7 @@ function App() {
    * de cambio de pregunta por el mismo evento.
    */
   const focusHandlingRef = useRef(false)
-  const reloadHandledRef = useRef(false)
   const lastFocusEventAtRef = useRef(0)
-
-  const attemptIdAtPageLoadRef = useRef(
-  sessionStorage.getItem(
-    'quiza_active_attempt_id'
-  )
-)
 
   const oneMinuteWarningShownRef = useRef(false)
   const tenSecondsWarningShownRef = useRef(false)
@@ -443,79 +436,6 @@ function App() {
   currentQuestion,
   integrityAlert,
 ])
-
-  /*
- * Detectar una recarga real del navegador.
- *
- * Esperamos hasta que React haya recuperado:
- * - el intento activo;
- * - la pregunta actual.
- *
- * Entonces registramos la recarga como
- * incidencia de integridad una sola vez.
- */
-useEffect(() => {
-  if (reloadHandledRef.current) {
-    return
-  }
-
-  const navigationEntry =
-    performance.getEntriesByType('navigation')?.[0]
-
-  /*
-   * La página no nació de una recarga.
-   */
-  if (navigationEntry?.type !== 'reload') {
-    reloadHandledRef.current = true
-    return
-  }
-
-  /*
-   * La página sí nació de un F5, pero en el
-   * instante de cargar NO había un intento activo.
-   *
-   * Por tanto, esa recarga no puede atribuirse
-   * a un quiz que el estudiante empiece después.
-   */
-  if (!attemptIdAtPageLoadRef.current) {
-    reloadHandledRef.current = true
-    return
-  }
-
-  /*
-   * Si había un intento activo al ocurrir el F5,
-   * esperamos a que React termine de restaurarlo.
-   */
-  if (
-    !activeAttempt ||
-    !currentQuestion ||
-    integrityAlert
-  ) {
-    return
-  }
-
-  /*
-   * Protección adicional:
-   * la incidencia debe corresponder exactamente
-   * al intento que existía cuando ocurrió el F5.
-   */
-  if (
-    activeAttempt.attempt_id !==
-    attemptIdAtPageLoadRef.current
-  ) {
-    reloadHandledRef.current = true
-    return
-  }
-
-  reloadHandledRef.current = true
-
-  replaceQuestionOnFocusLoss('reload')
-}, [
-  activeAttempt,
-  currentQuestion,
-  integrityAlert,
-])
-
 
   /*
   * Ocultar automáticamente el QR cuando
