@@ -12,8 +12,12 @@ configuración o dispositivos externos. No acredita despliegue ni producción.
 - Suite reproducible: 23 archivos, 57 pruebas aprobadas, 0 fallidas.
 - Supabase efímero: 14 migraciones aplicadas desde cero y entorno destruido al
   terminar; el proyecto local habitual permaneció intacto.
-- Rama local: 24 commits por delante de `origin/v1.1-dev` antes del commit de
-  aislamiento por sesión documentado en este corte.
+- Cobertura V8: 57.19% sentencias, 62.08% ramas, 64.15% funciones y 57.27%
+  líneas sobre `src/App.jsx`.
+- `npm audit`: 0 vulnerabilidades. Build de producción: aprobado.
+- Lint: código de salida 0; quedan tres advertencias conocidas de dependencias
+  de hooks en `src/App.jsx` y advertencias del bundle minificado en `docs/assets`.
+- Último commit funcional: `2aecf63` (`Reforzar aislamiento de intentos por sesión`).
 - `KI-01` quedó corregido y probado: se puede eliminar un quiz sin intentos con
   sus variantes por cascada, y se conserva todo quiz que ya tenga historial.
 
@@ -45,12 +49,11 @@ configuración o dispositivos externos. No acredita despliegue ni producción.
 - `10a9e20`: aleatorización visual sin alterar la identidad de la respuesta.
 - `09db31f`: prueba integral del límite de incidencias y bloqueo.
 - `73159a0`: prueba de una cuenta sin rol académico rígido.
-- En curso al escribir este corte: consolidar el rechazo de escrituras desde una
+- `2aecf63`: rechazo de lectura, respuesta, heartbeat e incidencia desde una
   segunda sesión autenticada; suite completa aprobada con 57/57 pruebas.
 
 ## Pendientes y riesgos externos
 
-- Ejecutar una vez el cierre integral: cobertura, `npm audit`, lint y build.
 - Probar Google OAuth y confirmación de correo con la configuración real del
   proyecto antes de liberar.
 - Probar cámara/`BarcodeDetector` en dispositivos objetivo; la ruta manual y el
@@ -61,6 +64,6 @@ configuración o dispositivos externos. No acredita despliegue ni producción.
 
 ## Siguiente acción exacta
 
-Finalizar el commit local de aislamiento por sesión y ejecutar una única pasada
-de `npm run test:coverage`, `npm audit`, `npm run lint` y `npm run build`. Después,
-revisar el árbol Git y documentar únicamente riesgos no ejecutables localmente.
+Revisar los commits locales y, solo con autorización explícita, preparar un
+entorno de piloto para validar OAuth, correo, proveedor LLM, cámara y acceso desde
+redes distintas. No hacer push, despliegue ni cambios remotos en esta fase.
