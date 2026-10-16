@@ -62,6 +62,95 @@ function createAnonymousRespondentToken() {
   ).join('')
 }
 
+function parseParticipantInput(input, existingEmails = []) {
+  const candidates = []
+  const invalidEntries = []
+
+  function addCandidate(emailValue, nameValue, source) {
+    const email = emailValue.trim().toLowerCase()
+    const participantName = nameValue?.trim() || null
+
+    if (!basicEmailPattern.test(email)) {
+      invalidEntries.push(source)
+      return
+    }
+
+    candidates.push({ email, participantName })
+  }
+
+  input
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      const tabParts = line.split('\t').map((part) => part.trim())
+
+      if (tabParts.length > 1) {
+        const email = tabParts.at(-1)
+        addCandidate(email, tabParts.slice(0, -1).join(' '), line)
+        return
+      }
+
+      const commaParts = line.split(',').map((part) => part.trim())
+
+      if (
+        commaParts.length > 1 &&
+        commaParts.every((part) => basicEmailPattern.test(part.toLowerCase()))
+      ) {
+        commaParts.forEach((email) => addCandidate(email, null, line))
+        return
+      }
+
+      if (
+        commaParts.length > 1 &&
+        basicEmailPattern.test(commaParts.at(-1).toLowerCase())
+      ) {
+        addCandidate(
+          commaParts.at(-1),
+          commaParts.slice(0, -1).join(', '),
+          line
+        )
+        return
+      }
+
+      if (basicEmailPattern.test(line.toLowerCase())) {
+        addCandidate(line, null, line)
+        return
+      }
+
+      const nameAndEmail = line.match(
+        /^(.*?)\s+([^\s@]+@[^\s@]+\.[^\s@]+)$/
+      )
+
+      if (nameAndEmail) {
+        addCandidate(nameAndEmail[2], nameAndEmail[1], line)
+        return
+      }
+
+      invalidEntries.push(line)
+    })
+
+  const knownEmails = new Set(existingEmails.map((email) => email.toLowerCase()))
+  const importedEmails = new Set()
+  const rows = []
+  let duplicateCount = 0
+
+  candidates.forEach((candidate) => {
+    if (
+      knownEmails.has(candidate.email) ||
+      importedEmails.has(candidate.email)
+    ) {
+      duplicateCount += 1
+      return
+    }
+
+    importedEmails.add(candidate.email)
+    rows.push(candidate)
+  })
+
+  return { rows, duplicateCount, invalidEntries }
+}
+
 function App() {
   const [authMode, setAuthMode] = useState('login')
   const [fullName, setFullName] = useState('')
@@ -103,6 +192,7 @@ function App() {
   const [selectedCourse, setSelectedCourse] = useState(null)
   const [authorizedEmails, setAuthorizedEmails] = useState([])
   const [participantsInput, setParticipantsInput] = useState('')
+  const [participantsPreview, setParticipantsPreview] = useState(null)
   const [participantsMessage, setParticipantsMessage] = useState('')
   const [loadingAuthorizedEmails, setLoadingAuthorizedEmails] = useState(false)
   const [addingAuthorizedEmails, setAddingAuthorizedEmails] = useState(false)
@@ -415,6 +505,7 @@ function App() {
     authorizedEmailsLoadIdRef.current += 1
     setAuthorizedEmails([])
     setParticipantsInput('')
+    setParticipantsPreview(null)
     setParticipantsMessage('')
     setLoadingAuthorizedEmails(false)
 
@@ -850,7 +941,7 @@ useEffect(() => {
 
     const { data, error } = await supabase
       .from('course_authorized_emails')
-      .select('id, email, created_at')
+      .select('id, email, participant_name, created_at')
       .eq('course_id', courseId)
       .order('email')
 
@@ -875,7 +966,7 @@ useEffect(() => {
     return true
   }
 
-  async function handleAddAuthorizedEmails() {
+  function handlePreviewAuthorizedEmails() {
     if (
       !selectedCourse ||
       selectedCourse.teacher_id !== profile?.id
@@ -886,88 +977,89 @@ useEffect(() => {
       return
     }
 
-    const entries = participantsInput
-      .split(/[,\n]+/)
-      .map((entry) => entry.trim().toLowerCase())
-      .filter(Boolean)
-
-    if (entries.length === 0) {
+    if (!participantsInput.trim()) {
       setParticipantsMessage(
-        'Pega al menos un correo para agregar participantes.'
+        'Pega al menos un correo o una fila con nombre y correo.'
       )
       return
     }
 
-    const existingEmails = new Set(
+    const preview = parseParticipantInput(
+      participantsInput,
       authorizedEmails.map(({ email }) => email)
     )
-    const inputEmails = new Set()
-    const newEmails = []
-    let duplicateCount = 0
-    let invalidCount = 0
-
-    entries.forEach((entry) => {
-      if (!basicEmailPattern.test(entry)) {
-        invalidCount += 1
-        return
-      }
-
-      if (
-        inputEmails.has(entry) ||
-        existingEmails.has(entry)
-      ) {
-        duplicateCount += 1
-        return
-      }
-
-      inputEmails.add(entry)
-      newEmails.push(entry)
-    })
-
     const summary = [
-      `${newEmails.length} ${newEmails.length === 1 ? 'agregado' : 'agregados'}`,
-      `${duplicateCount} ${duplicateCount === 1 ? 'duplicado ignorado' : 'duplicados ignorados'}`,
-      `${invalidCount} ${invalidCount === 1 ? 'inválido' : 'inválidos'}`,
+      `${preview.rows.length} ${
+        preview.rows.length === 1
+          ? 'listo para confirmar'
+          : 'listos para confirmar'
+      }`,
+      `${preview.duplicateCount} ${
+        preview.duplicateCount === 1
+          ? 'duplicado ignorado'
+          : 'duplicados ignorados'
+      }`,
+      `${preview.invalidEntries.length} ${
+        preview.invalidEntries.length === 1 ? 'inválido' : 'inválidos'
+      }`,
     ].join(' · ')
+
+    setParticipantsPreview(preview)
+    setParticipantsMessage(summary)
+  }
+
+  async function handleAddAuthorizedEmails() {
+    if (
+      !selectedCourse ||
+      selectedCourse.teacher_id !== profile?.id ||
+      !participantsPreview ||
+      participantsPreview.rows.length === 0
+    ) {
+      return
+    }
+
+    const rowsToInsert = participantsPreview.rows
 
     setAddingAuthorizedEmails(true)
     setParticipantsMessage('')
 
-    if (newEmails.length > 0) {
-      const { error } = await supabase
-        .from('course_authorized_emails')
-        .insert(
-          newEmails.map((authorizedEmail) => ({
-            course_id: selectedCourse.id,
-            email: authorizedEmail,
-          }))
-        )
+    const { error } = await supabase
+      .from('course_authorized_emails')
+      .insert(
+        rowsToInsert.map(({ email, participantName }) => ({
+          course_id: selectedCourse.id,
+          email,
+          participant_name: participantName,
+        }))
+      )
 
-      if (
-        selectedCourseIdRef.current !== selectedCourse.id
-      ) {
-        setAddingAuthorizedEmails(false)
-        return
-      }
-
-      if (error) {
-        setParticipantsMessage(
-          `Error agregando participantes: ${error.message}`
-        )
-        setAddingAuthorizedEmails(false)
-        return
-      }
+    if (selectedCourseIdRef.current !== selectedCourse.id) {
+      setAddingAuthorizedEmails(false)
+      return
     }
 
-    const reloaded = await loadAuthorizedEmails(
-      selectedCourse.id
-    )
+    if (error) {
+      setParticipantsMessage(
+        `Error agregando participantes: ${error.message}`
+      )
+      setAddingAuthorizedEmails(false)
+      return
+    }
+
+    const reloaded = await loadAuthorizedEmails(selectedCourse.id)
 
     setParticipantsInput('')
+    setParticipantsPreview(null)
     setAddingAuthorizedEmails(false)
 
     if (reloaded) {
-      setParticipantsMessage(summary)
+      setParticipantsMessage(
+        `${rowsToInsert.length} ${
+          rowsToInsert.length === 1
+            ? 'participante agregado'
+            : 'participantes agregados'
+        } ✅`
+      )
     }
   }
 
@@ -4770,16 +4862,18 @@ function renderAuthenticatedHeader() {
 
                     <label className="participants-input">
                       <span>
-                        Correos separados por coma o salto de línea
+                        Correos, o filas con nombre y correo
                       </span>
 
                       <textarea
                         value={participantsInput}
-                        onChange={(event) =>
+                        onChange={(event) => {
                           setParticipantsInput(event.target.value)
-                        }
+                          setParticipantsPreview(null)
+                          setParticipantsMessage('')
+                        }}
                         rows="5"
-                        placeholder="ana@ejemplo.com&#10;luis@ejemplo.com"
+                        placeholder="Ana Torres&#9;ana@ejemplo.com&#10;luis@ejemplo.com"
                         disabled={
                           addingAuthorizedEmails ||
                           deletingAuthorizedEmailId !== null
@@ -4789,17 +4883,62 @@ function renderAuthenticatedHeader() {
 
                     <button
                       type="button"
-                      onClick={handleAddAuthorizedEmails}
+                      onClick={handlePreviewAuthorizedEmails}
                       disabled={
                         addingAuthorizedEmails ||
                         loadingAuthorizedEmails ||
                         deletingAuthorizedEmailId !== null
                       }
                     >
-                      {addingAuthorizedEmails
-                        ? 'Agregando...'
-                        : 'Agregar participantes'}
+                      Previsualizar participantes
                     </button>
+
+                    {participantsPreview && (
+                      <div className="participants-preview">
+                        <h3>Previsualización</h3>
+
+                        {participantsPreview.rows.length > 0 ? (
+                          <ul>
+                            {participantsPreview.rows.map((participant) => (
+                              <li key={participant.email}>
+                                <span>
+                                  {participant.participantName || 'Sin nombre'}
+                                </span>
+                                <strong>{participant.email}</strong>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="empty-state">
+                            No hay filas válidas para confirmar.
+                          </p>
+                        )}
+
+                        {participantsPreview.invalidEntries.length > 0 && (
+                          <p>
+                            Revisa:{' '}
+                            {participantsPreview.invalidEntries.join(' · ')}
+                          </p>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={handleAddAuthorizedEmails}
+                          disabled={
+                            addingAuthorizedEmails ||
+                            participantsPreview.rows.length === 0
+                          }
+                        >
+                          {addingAuthorizedEmails
+                            ? 'Agregando...'
+                            : `Confirmar ${participantsPreview.rows.length} ${
+                                participantsPreview.rows.length === 1
+                                  ? 'participante'
+                                  : 'participantes'
+                              }`}
+                        </button>
+                      </div>
+                    )}
 
                     {participantsMessage && (
                       <p
@@ -4822,7 +4961,14 @@ function renderAuthenticatedHeader() {
                       <ul className="participants-list">
                         {authorizedEmails.map((authorizedEmail) => (
                           <li key={authorizedEmail.id}>
-                            <span>{authorizedEmail.email}</span>
+                            <span>
+                              {authorizedEmail.participant_name && (
+                                <strong>
+                                  {authorizedEmail.participant_name}
+                                </strong>
+                              )}
+                              {authorizedEmail.email}
+                            </span>
 
                             <button
                               type="button"

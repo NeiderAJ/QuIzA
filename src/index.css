@@ -673,6 +673,34 @@ section > button + button:hover:not(:disabled) {
   font-size: 0.92rem;
 }
 
+.participants-preview {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--soft);
+}
+
+.participants-preview h3 {
+  margin-top: 0;
+}
+
+.participants-preview ul {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.participants-preview li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.participants-preview li strong {
+  overflow-wrap: anywhere;
+}
+
 .participants-list {
   display: grid;
   grid-template-columns: 1fr;
@@ -694,6 +722,11 @@ section > button + button:hover:not(:disabled) {
 .participants-list span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.participants-list span > strong {
+  display: block;
+  color: var(--text-900);
 }
 
 .participants-list li > button {
