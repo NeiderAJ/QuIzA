@@ -151,6 +151,27 @@ function parseParticipantInput(input, existingEmails = []) {
   return { rows, duplicateCount, invalidEntries }
 }
 
+function parseQuizaQrValue(value) {
+  const qrUrl = new URL(value.trim(), window.location.origin)
+
+  if (qrUrl.origin !== window.location.origin) {
+    throw new Error('El código no pertenece a esta instalación de QuIzA.')
+  }
+
+  const joinToken = qrUrl.searchParams.get('join')
+  const surveyToken = qrUrl.searchParams.get('survey')
+
+  if (joinToken) {
+    return { type: 'qrr', token: joinToken }
+  }
+
+  if (surveyToken) {
+    return { type: 'qrs', token: surveyToken }
+  }
+
+  throw new Error('El código no contiene un acceso QRR o QRS válido.')
+}
+
 function App() {
   const [authMode, setAuthMode] = useState('login')
   const [fullName, setFullName] = useState('')
@@ -159,6 +180,9 @@ function App() {
 
   const [profile, setProfile] = useState(null)
   const [authenticatedView, setAuthenticatedView] = useState('panel-v1')
+  const [scannerStatus, setScannerStatus] = useState('idle')
+  const [scannerMessage, setScannerMessage] = useState('')
+  const [scannerManualInput, setScannerManualInput] = useState('')
 
   const [evaluationTitle, setEvaluationTitle] = useState('')
   const [evaluationDuration, setEvaluationDuration] = useState('')
@@ -305,6 +329,8 @@ function App() {
   const questionOperationRef = useRef(null)
   const quizResultsLoadIdRef = useRef(0)
   const attemptResultDetailLoadIdRef = useRef(0)
+  const scannerVideoRef = useRef(null)
+  const scannerValueHandlerRef = useRef(null)
 
   const baseQuestions = questionVariants.filter(
     ({ variant_number: variantNumber }) => variantNumber === 1
@@ -321,6 +347,7 @@ function App() {
   selectedQuizCourseIdRef.current = selectedQuizCourseId
   selectedCourseTeacherIdRef.current = selectedCourseTeacherId
   profileIdRef.current = profileId
+  scannerValueHandlerRef.current = handleRecognizedQrValue
 
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
@@ -643,6 +670,106 @@ function App() {
       window.clearInterval(refreshId)
     }
   }, [quizSession?.quiz_session_id])
+
+  useEffect(() => {
+    if (authenticatedView !== 'scan-qr') {
+      return
+    }
+
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof window.BarcodeDetector !== 'function'
+    ) {
+      setScannerStatus('unavailable')
+      setScannerMessage(
+        'La cámara o el detector QR no están disponibles en este navegador. Pega el enlace como alternativa.'
+      )
+      return
+    }
+
+    let cancelled = false
+    let cameraStream = null
+    let animationFrameId = null
+    const scannerVideo = scannerVideoRef.current
+
+    if (!scannerVideo) {
+      setScannerStatus('error')
+      setScannerMessage('No fue posible preparar la vista de la cámara.')
+      return
+    }
+
+    async function startScanner() {
+      try {
+        setScannerStatus('starting')
+        setScannerMessage('Solicitando acceso a la cámara...')
+
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        })
+
+        if (cancelled) {
+          cameraStream.getTracks().forEach((track) => track.stop())
+          return
+        }
+
+        scannerVideo.srcObject = cameraStream
+        await scannerVideo.play()
+
+        const detector = new window.BarcodeDetector({
+          formats: ['qr_code'],
+        })
+
+        setScannerStatus('scanning')
+        setScannerMessage('Apunta la cámara al código QR.')
+
+        async function scanFrame() {
+          if (cancelled) {
+            return
+          }
+
+          try {
+            const detectedCodes = await detector.detect(scannerVideo)
+            const rawValue = detectedCodes[0]?.rawValue
+
+            if (rawValue) {
+              setScannerStatus('processing')
+              setScannerMessage('Código detectado. Validando acceso...')
+              await scannerValueHandlerRef.current(rawValue)
+              return
+            }
+          } catch (error) {
+            console.error('Error leyendo QR:', error)
+          }
+
+          animationFrameId = window.requestAnimationFrame(scanFrame)
+        }
+
+        animationFrameId = window.requestAnimationFrame(scanFrame)
+      } catch (error) {
+        if (!cancelled) {
+          setScannerStatus('error')
+          setScannerMessage(
+            `No fue posible usar la cámara: ${error.message}. Puedes pegar el enlace.`
+          )
+        }
+      }
+    }
+
+    startScanner()
+
+    return () => {
+      cancelled = true
+
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId)
+      }
+
+      cameraStream?.getTracks().forEach((track) => track.stop())
+
+      scannerVideo.srcObject = null
+    }
+  }, [authenticatedView])
 
   /*
    * ============================================================
@@ -2105,6 +2232,57 @@ async function restoreStoredAttempt() {
     return true
   }
 
+  function handleOpenScanner() {
+    setScannerStatus('idle')
+    setScannerMessage('')
+    setScannerManualInput('')
+    setAuthenticatedView('scan-qr')
+    setMessage('')
+  }
+
+  async function handleRecognizedQrValue(value) {
+    let parsedValue
+
+    try {
+      parsedValue = parseQuizaQrValue(value)
+    } catch (error) {
+      setScannerStatus('error')
+      setScannerMessage(error.message)
+      return false
+    }
+
+    setScannerStatus('processing')
+    setScannerMessage('Validando código...')
+
+    if (parsedValue.type === 'qrs') {
+      const nextUrl = new URL(window.location.pathname, window.location.origin)
+      nextUrl.searchParams.set('survey', parsedValue.token)
+      window.history.replaceState({}, '', nextUrl)
+      setPublicSurveyToken(parsedValue.token)
+      setAuthenticatedView('panel-v1')
+      return true
+    }
+
+    const nextUrl = new URL(window.location.pathname, window.location.origin)
+    nextUrl.searchParams.set('join', parsedValue.token)
+    window.history.replaceState({}, '', nextUrl)
+    setJoinToken(parsedValue.token)
+    setAuthenticatedView('panel-v1')
+
+    return joinQuizSession(parsedValue.token)
+  }
+
+  async function handleManualQrSubmit(event) {
+    event.preventDefault()
+
+    if (!scannerManualInput.trim()) {
+      setScannerMessage('Pega un enlace QRR o QRS para continuar.')
+      return
+    }
+
+    await handleRecognizedQrValue(scannerManualInput)
+  }
+
 
   async function handleStartAsyncQuiz() {
   if (!selectedQuiz) {
@@ -2873,6 +3051,9 @@ useEffect(() => {
     setFullName('')
     setAuthMode('login')
     setAuthenticatedView('panel-v1')
+    setScannerStatus('idle')
+    setScannerMessage('')
+    setScannerManualInput('')
 
     setMessage('')
   }
@@ -3722,6 +3903,71 @@ function renderAuthenticatedHeader() {
       integrityAlert
 
     if (
+      authenticatedView === 'scan-qr' &&
+      !hasPriorityQuizFlow
+    ) {
+      return (
+        <main>
+          {renderAuthenticatedHeader()}
+
+          <section className="qr-scanner" aria-labelledby="scanner-heading">
+            <div className="results-header">
+              <div>
+                <h2 id="scanner-heading">Escanear QR</h2>
+                <p>Reconoce accesos QRR y encuestas QRS de QuIzA.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthenticatedView('panel-v1')
+                  setScannerManualInput('')
+                  setScannerMessage('')
+                }}
+              >
+                Volver al dashboard
+              </button>
+            </div>
+
+            <video
+              ref={scannerVideoRef}
+              className="qr-scanner-video"
+              muted
+              playsInline
+              aria-label="Vista de la cámara para escanear QR"
+            />
+
+            {scannerMessage && (
+              <p role={scannerStatus === 'error' ? 'alert' : 'status'}>
+                {scannerMessage}
+              </p>
+            )}
+
+            <form onSubmit={handleManualQrSubmit}>
+              <label>
+                Enlace QRR o QRS
+                <input
+                  type="url"
+                  value={scannerManualInput}
+                  onChange={(event) =>
+                    setScannerManualInput(event.target.value)
+                  }
+                  placeholder={`${window.location.origin}/?join=...`}
+                  disabled={scannerStatus === 'processing'}
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={scannerStatus === 'processing'}
+              >
+                Abrir código
+              </button>
+            </form>
+          </section>
+        </main>
+      )
+    }
+
+    if (
       authenticatedView === 'create-survey' &&
       !hasPriorityQuizFlow
     ) {
@@ -3936,11 +4182,7 @@ function renderAuthenticatedHeader() {
           >
             <button
               type="button"
-              onClick={() =>
-                setMessage(
-                  'El escáner interno aún está en desarrollo. Por ahora, abre el código QR con la cámara de tu dispositivo.'
-                )
-              }
+              onClick={handleOpenScanner}
             >
               Escanear QR
             </button>
@@ -4100,12 +4342,7 @@ function renderAuthenticatedHeader() {
               >
                 <button
                   type="button"
-                  onClick={() => {
-                    setAuthenticatedView('panel-v1')
-                    setMessage(
-                      'El escáner interno aún está en desarrollo. Por ahora, abre el código QR con la cámara de tu dispositivo.'
-                    )
-                  }}
+                  onClick={handleOpenScanner}
                 >
                   Escanear QR
                 </button>

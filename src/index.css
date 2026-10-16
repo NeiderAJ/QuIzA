@@ -669,6 +669,26 @@ section > button + button:hover:not(:disabled) {
   border-radius: 9px;
 }
 
+.qr-scanner {
+  width: min(100%, 720px);
+  margin-top: 28px;
+}
+
+.qr-scanner-video {
+  display: block;
+  width: min(100%, 560px);
+  min-height: 240px;
+  margin: 24px auto 0;
+  border-radius: 12px;
+  background: #17201a;
+  object-fit: cover;
+}
+
+.qr-scanner form {
+  width: min(100%, 560px);
+  margin: 24px auto 0;
+}
+
 .participants-section h2 {
   margin-bottom: 4px;
 }
