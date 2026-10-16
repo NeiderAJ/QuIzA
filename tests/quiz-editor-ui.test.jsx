@@ -242,5 +242,28 @@ describe('editor y publicación de seis variantes', () => {
     expect(questionResult.data.statement).toBe(
       'Variante revisada por el evaluador'
     )
+
+    await user.click(
+      screen.getByRole('button', { name: 'Duplicar evaluación' })
+    )
+
+    expect(
+      await screen.findByText(/creada en borrador ✅/)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Publicar evaluación' })
+    ).toBeInTheDocument()
+    expect(await screen.findByText('6/6 variantes preparadas')).toBeInTheDocument()
+
+    const { data: quizzes, error: quizzesError } = await context.service
+      .from('quizzes')
+      .select('id, status, title')
+      .eq('course_id', context.courseId)
+      .order('created_at')
+
+    expect(quizzesError).toBeNull()
+    expect(quizzes).toHaveLength(2)
+    expect(quizzes[1].status).toBe('draft')
+    expect(quizzes[1].title).toContain('(copia)')
   })
 })

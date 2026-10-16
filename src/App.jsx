@@ -74,6 +74,7 @@ function App() {
   )
   const [savingQuestionId, setSavingQuestionId] = useState(null)
   const [publishingQuiz, setPublishingQuiz] = useState(false)
+  const [duplicatingQuiz, setDuplicatingQuiz] = useState(false)
 
   const [quizSession, setQuizSession] = useState(null)
   const [projectionMode, setProjectionMode] = useState(false)
@@ -326,6 +327,7 @@ function App() {
     setQuestionEditDraft(createEmptyBaseQuestionDraft())
     setSavingQuestionId(null)
     setPublishingQuiz(false)
+    setDuplicatingQuiz(false)
 
     if (
       !selectedQuizId ||
@@ -1258,6 +1260,51 @@ useEffect(() => {
     }
 
     setBaseQuestionsMessage('Evaluación publicada y lista para abrir por QR ✅')
+  }
+
+  async function handleDuplicateQuiz() {
+    const sourceQuiz = selectedQuiz
+    const courseId = selectedCourse?.id
+
+    if (
+      !sourceQuiz ||
+      !courseId ||
+      selectedCourse?.teacher_id !== profile?.id ||
+      sourceQuiz.course_id !== courseId
+    ) {
+      setMessage('No tienes permiso para duplicar esta evaluación.')
+      return
+    }
+
+    setDuplicatingQuiz(true)
+    setMessage('Duplicando evaluación...')
+
+    const { data: copyId, error } = await supabase.rpc('duplicate_quiz', {
+      p_source_quiz_id: sourceQuiz.id,
+      p_title: null,
+    })
+
+    if (error) {
+      setDuplicatingQuiz(false)
+      setMessage(`No fue posible duplicar la evaluación: ${error.message}`)
+      return
+    }
+
+    const quizzesLoaded = await loadQuizzes(courseId)
+    const copiedQuiz = quizzesLoaded
+      ? await loadQuizMetadata(copyId)
+      : null
+
+    setDuplicatingQuiz(false)
+
+    if (!copiedQuiz) {
+      setMessage(
+        'La evaluación se duplicó, pero no fue posible abrir la copia automáticamente.'
+      )
+      return
+    }
+
+    setMessage(`Copia “${copiedQuiz.title}” creada en borrador ✅`)
   }
 
   async function loadQuizMetadata(quizId) {
@@ -3222,6 +3269,18 @@ function renderAuthenticatedHeader() {
                               : 'Publicar evaluación'}
                           </button>
                         )}
+
+                      {isSelectedEvaluationOwner && (
+                        <button
+                          type="button"
+                          onClick={handleDuplicateQuiz}
+                          disabled={duplicatingQuiz}
+                        >
+                          {duplicatingQuiz
+                            ? 'Duplicando...'
+                            : 'Duplicar evaluación'}
+                        </button>
+                      )}
 
                       {isSelectedEvaluationOwner &&
                         selectedQuiz.delivery_mode === 'in_person' &&
