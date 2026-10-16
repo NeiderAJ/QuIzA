@@ -171,6 +171,8 @@ export async function createQuizWithVariants(
   {
     numberOfSlots = 1,
     status = 'draft',
+    variantNumbers = [1, 2, 3, 4, 5, 6],
+    questionOverrides = () => ({}),
   } = {}
 ) {
   const quizId = randomUUID()
@@ -198,8 +200,14 @@ export async function createQuizWithVariants(
     .from('questions')
     .insert(
       Array.from({ length: numberOfSlots }, (_, index) =>
-        Array.from({ length: 6 }, (_, variantIndex) =>
-          buildQuestion(quizId, index + 1, variantIndex + 1)
+        variantNumbers.map((variantNumber) =>
+          ({
+            ...buildQuestion(quizId, index + 1, variantNumber),
+            ...questionOverrides({
+              slotNumber: index + 1,
+              variantNumber,
+            }),
+          })
         )
       ).flat()
     )
@@ -255,14 +263,13 @@ export async function createAttemptFixture(
       course_id: context.courseId,
       created_by: context.teacherId,
       title: `Evaluación expired ${quizId}`,
-      status: 'published',
+      status: 'draft',
       duration_minutes: 1,
       grade_scale_max: 5,
       number_of_slots: numberOfSlots,
       variants_per_slot: 6,
       max_focus_violations: 5,
       delivery_mode: 'in_person',
-      published_at: new Date().toISOString(),
     })
 
   assertSuccess(quizError, 'Crear evaluación de prueba')
@@ -293,6 +300,12 @@ export async function createAttemptFixture(
       )
     }
   }
+
+  const { error: publishError } = await context.teacher.rpc('publish_quiz', {
+    p_quiz_id: quizId,
+  })
+
+  assertSuccess(publishError, 'Publicar evaluación de prueba')
 
   const assignedQuestions = questions.filter(
     (question) => question.variant_number === 1
