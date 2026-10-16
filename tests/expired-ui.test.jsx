@@ -141,7 +141,7 @@ describe('expired en la interfaz', () => {
 
     await renderActiveAttempt(fixture, 2, 2)
 
-    await user.click(screen.getByRole('radio', { name: /A\./ }))
+    await user.click(screen.getByRole('radio', { name: /Correcta/ }))
     await user.click(screen.getByRole('button', { name: 'Enviar respuesta' }))
 
     expect(await screen.findByText('Tiempo agotado.')).toBeInTheDocument()
@@ -201,7 +201,7 @@ describe('expired en la interfaz', () => {
 
     await renderActiveAttempt(fixture, 3, 3)
 
-    await user.click(screen.getByRole('radio', { name: /A\./ }))
+    await user.click(screen.getByRole('radio', { name: /Correcta/ }))
     await user.click(screen.getByRole('button', { name: 'Enviar respuesta' }))
 
     expect(await screen.findByText('Tiempo agotado.')).toBeInTheDocument()
@@ -223,7 +223,7 @@ describe('expired en la interfaz', () => {
 
     await renderActiveAttempt(fixture, 1, 1)
 
-    await user.click(screen.getByRole('radio', { name: /A\./ }))
+    await user.click(screen.getByRole('radio', { name: /Correcta/ }))
     await user.click(screen.getByRole('button', { name: 'Enviar respuesta' }))
 
     expect(

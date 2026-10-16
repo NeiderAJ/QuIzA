@@ -37,12 +37,52 @@ function createEmptyBaseQuestionDraft() {
   }
 }
 
-function formatAnswerPayload(answerPayload) {
+function formatAnswerPayload(answerPayload, options = []) {
   if (!answerPayload) {
     return 'Sin respuesta'
   }
 
-  return answerPayload.selected_option ?? JSON.stringify(answerPayload)
+  const selectedOption = answerPayload.selected_option
+
+  if (selectedOption) {
+    return options.find((option) => option.id === selectedOption)?.text ??
+      selectedOption
+  }
+
+  return JSON.stringify(answerPayload)
+}
+
+function orderOptionsForResponse(options, responseId) {
+  if (!Array.isArray(options) || options.length < 2 || !responseId) {
+    return options ?? []
+  }
+
+  let seed = 2166136261
+
+  for (const character of responseId) {
+    seed ^= character.charCodeAt(0)
+    seed = Math.imul(seed, 16777619) >>> 0
+  }
+
+  const orderedOptions = [...options]
+
+  for (let index = orderedOptions.length - 1; index > 0; index -= 1) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+    const targetIndex = seed % (index + 1)
+    const currentOption = orderedOptions[index]
+    orderedOptions[index] = orderedOptions[targetIndex]
+    orderedOptions[targetIndex] = currentOption
+  }
+
+  const preservedOriginalOrder = orderedOptions.every(
+    (option, index) => option.id === options[index].id
+  )
+
+  if (preservedOriginalOrder) {
+    orderedOptions.push(orderedOptions.shift())
+  }
+
+  return orderedOptions
 }
 
 function createEmptySurveyOptions() {
@@ -3756,6 +3796,10 @@ function renderAuthenticatedHeader() {
   }
 
   if (profile) {
+    const displayedCurrentQuestionOptions = orderOptionsForResponse(
+      currentQuestion?.options,
+      currentQuestion?.response_id
+    )
     const isSelectedCourseOwner =
       Boolean(selectedCourse) &&
       selectedCourse?.teacher_id === profile.id
@@ -5230,7 +5274,8 @@ function renderAuthenticatedHeader() {
                                     <dt>Respuesta</dt>
                                     <dd>
                                       {formatAnswerPayload(
-                                        response.answer_payload
+                                        response.answer_payload,
+                                        response.options
                                       )}
                                     </dd>
                                   </div>
@@ -5238,7 +5283,8 @@ function renderAuthenticatedHeader() {
                                     <dt>Correcta</dt>
                                     <dd>
                                       {formatAnswerPayload(
-                                        response.correct_answer
+                                        response.correct_answer,
+                                        response.options
                                       )}
                                     </dd>
                                   </div>
@@ -5562,8 +5608,8 @@ function renderAuthenticatedHeader() {
                 {currentQuestion.question_type ===
                   'multiple_choice' && (
                   <div>
-                    {currentQuestion.options?.map(
-                      (option) => (
+                    {displayedCurrentQuestionOptions.map(
+                      (option, optionIndex) => (
                         <label
                           key={option.id}
                           style={{
@@ -5592,7 +5638,7 @@ function renderAuthenticatedHeader() {
                           {' '}
 
                           <strong>
-                            {option.id}.
+                            {baseQuestionOptionIds[optionIndex]}.
                           </strong>{' '}
 
                           {option.text}

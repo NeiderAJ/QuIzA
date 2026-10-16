@@ -2,7 +2,7 @@
 
 import React from 'react'
 import '@testing-library/jest-dom/vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
@@ -194,20 +194,17 @@ describe('editor y publicación de seis variantes', () => {
       within(variantCard).getByRole('button', { name: 'Guardar cambios' })
     )
 
-    expect(
-      await screen.findByText(
-        'Variante revisada por el evaluador',
-        undefined,
-        { timeout: 5000 }
-      )
-    ).toBeInTheDocument()
-    expect(
-      await screen.findByText(
-        'Variante 2 de la pregunta 1 guardada.',
-        undefined,
-        { timeout: 5000 }
-      )
-    ).toBeInTheDocument()
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText('Variante revisada por el evaluador')
+        ).toBeInTheDocument()
+        expect(
+          screen.getByText('Variante 2 de la pregunta 1 guardada.')
+        ).toBeInTheDocument()
+      },
+      { timeout: 5000 }
+    )
 
     const publishButton = screen.getByRole('button', {
       name: 'Publicar evaluación',
