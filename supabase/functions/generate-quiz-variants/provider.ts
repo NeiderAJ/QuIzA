@@ -1,45 +1,47 @@
 export const VARIANT_PROMPT_VERSION = 'quiza-v1.1-2026-10-16'
 
-const responseSchema = {
-  name: 'quiza_variants',
-  strict: true,
-  schema: {
-    type: 'object',
-    additionalProperties: false,
-    required: ['variants'],
-    properties: {
-      variants: {
-        type: 'array',
-        minItems: 5,
-        maxItems: 5,
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['statement', 'options', 'correct_answer'],
-          properties: {
-            statement: { type: 'string' },
-            options: {
-              type: 'array',
-              minItems: 4,
-              maxItems: 4,
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['id', 'text'],
-                properties: {
-                  id: { type: 'string', enum: ['A', 'B', 'C', 'D'] },
-                  text: { type: 'string' },
+function buildResponseSchema(variantCount: number) {
+  return {
+    name: 'quiza_variants',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['variants'],
+      properties: {
+        variants: {
+          type: 'array',
+          minItems: variantCount,
+          maxItems: variantCount,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['statement', 'options', 'correct_answer'],
+            properties: {
+              statement: { type: 'string' },
+              options: {
+                type: 'array',
+                minItems: 4,
+                maxItems: 4,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['id', 'text'],
+                  properties: {
+                    id: { type: 'string', enum: ['A', 'B', 'C', 'D'] },
+                    text: { type: 'string' },
+                  },
                 },
               },
-            },
-            correct_answer: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['selected_option'],
-              properties: {
-                selected_option: {
-                  type: 'string',
-                  enum: ['A', 'B', 'C', 'D'],
+              correct_answer: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['selected_option'],
+                properties: {
+                  selected_option: {
+                    type: 'string',
+                    enum: ['A', 'B', 'C', 'D'],
+                  },
                 },
               },
             },
@@ -47,7 +49,7 @@ const responseSchema = {
         },
       },
     },
-  },
+  }
 }
 
 export class ProviderGenerationError extends Error {
@@ -77,6 +79,8 @@ type GenerateOptions = {
   apiUrl: string
   model: string
   baseQuestion: BaseQuestion
+  existingVariants?: unknown[]
+  variantCount?: number
   fetchImpl?: typeof fetch
   timeoutMs?: number
 }
@@ -87,29 +91,46 @@ type ProviderResult = {
   outputTokens: number | null
 }
 
-export function buildProviderRequest(model: string, baseQuestion: BaseQuestion) {
+export function buildProviderRequest(
+  model: string,
+  baseQuestion: BaseQuestion,
+  {
+    existingVariants = [],
+    variantCount = 5,
+  }: {
+    existingVariants?: unknown[]
+    variantCount?: number
+  } = {}
+) {
   return {
     model,
     temperature: 0.7,
     messages: [
       {
         role: 'system',
-        content:
-          'Eres un asistente pedagógico. Genera exactamente cinco variantes de selección múltiple equivalentes a la pregunta base. Conserva el concepto y una dificultad aproximada, usa exactamente cuatro opciones A-D, una sola respuesta correcta y evita copiar literalmente la base o repetir variantes. Devuelve únicamente la estructura solicitada.',
+        content: `Eres un asistente pedagógico. Genera exactamente ${variantCount} ${
+          variantCount === 1 ? 'variante' : 'variantes'
+        } de selección múltiple equivalentes a la pregunta base. Conserva el concepto y una dificultad aproximada, usa exactamente cuatro opciones A-D, una sola respuesta correcta y evita copiar literalmente la base o repetir variantes existentes. Devuelve únicamente la estructura solicitada.`,
       },
       {
         role: 'user',
-        content: JSON.stringify({ base_question: baseQuestion }),
+        content: JSON.stringify({
+          base_question: baseQuestion,
+          existing_variants: existingVariants,
+        }),
       },
     ],
     response_format: {
       type: 'json_schema',
-      json_schema: responseSchema,
+      json_schema: buildResponseSchema(variantCount),
     },
   }
 }
 
-export function parseProviderResponse(payload: unknown): ProviderResult {
+export function parseProviderResponse(
+  payload: unknown,
+  expectedVariantCount = 5
+): ProviderResult {
   if (!payload || typeof payload !== 'object') {
     throw new ProviderGenerationError(
       'El proveedor devolvió una respuesta vacía.',
@@ -141,9 +162,14 @@ export function parseProviderResponse(payload: unknown): ProviderResult {
     )
   }
 
-  if (!Array.isArray(parsed.variants) || parsed.variants.length !== 5) {
+  if (
+    !Array.isArray(parsed.variants) ||
+    parsed.variants.length !== expectedVariantCount
+  ) {
     throw new ProviderGenerationError(
-      'El proveedor no devolvió exactamente cinco variantes.',
+      `El proveedor no devolvió exactamente ${expectedVariantCount} ${
+        expectedVariantCount === 1 ? 'variante' : 'variantes'
+      }.`,
       'invalid_variant_count'
     )
   }
@@ -167,6 +193,8 @@ export async function generateVariantsWithProvider({
   apiUrl,
   model,
   baseQuestion,
+  existingVariants = [],
+  variantCount = 5,
   fetchImpl = fetch,
   timeoutMs = 60000,
 }: GenerateOptions): Promise<ProviderResult> {
@@ -180,7 +208,12 @@ export async function generateVariantsWithProvider({
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(buildProviderRequest(model, baseQuestion)),
+      body: JSON.stringify(
+        buildProviderRequest(model, baseQuestion, {
+          existingVariants,
+          variantCount,
+        })
+      ),
       signal: abortController.signal,
     })
 
@@ -192,7 +225,7 @@ export async function generateVariantsWithProvider({
       )
     }
 
-    return parseProviderResponse(await response.json())
+    return parseProviderResponse(await response.json(), variantCount)
   } catch (error) {
     if (error instanceof ProviderGenerationError) {
       throw error

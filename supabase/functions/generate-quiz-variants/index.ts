@@ -81,13 +81,20 @@ Deno.serve(async (request: Request) => {
     return jsonResponse({ error: 'Autenticación requerida.' }, 401, corsHeaders)
   }
 
-  let requestBody: { baseQuestionId?: unknown }
+  let requestBody: {
+    baseQuestionId?: unknown
+    variantQuestionId?: unknown
+  }
 
   try {
     const rawBody = await request.text()
 
     if (rawBody.length > 4096) {
-      return jsonResponse({ error: 'Solicitud demasiado grande.' }, 413, corsHeaders)
+      return jsonResponse(
+        { error: 'Solicitud demasiado grande.' },
+        413,
+        corsHeaders
+      )
     }
 
     requestBody = JSON.parse(rawBody)
@@ -95,11 +102,25 @@ Deno.serve(async (request: Request) => {
     return jsonResponse({ error: 'Solicitud JSON inválida.' }, 400, corsHeaders)
   }
 
+  const baseQuestionId =
+    typeof requestBody.baseQuestionId === 'string' &&
+    uuidPattern.test(requestBody.baseQuestionId)
+      ? requestBody.baseQuestionId
+      : null
+  const variantQuestionId =
+    typeof requestBody.variantQuestionId === 'string' &&
+    uuidPattern.test(requestBody.variantQuestionId)
+      ? requestBody.variantQuestionId
+      : null
+
   if (
-    typeof requestBody.baseQuestionId !== 'string' ||
-    !uuidPattern.test(requestBody.baseQuestionId)
+    Number(Boolean(baseQuestionId)) + Number(Boolean(variantQuestionId)) !== 1
   ) {
-    return jsonResponse({ error: 'La pregunta base es inválida.' }, 400, corsHeaders)
+    return jsonResponse(
+      { error: 'Envía una pregunta base o una variante válida, no ambas.' },
+      400,
+      corsHeaders
+    )
   }
 
   let runId: string | null = null
@@ -133,14 +154,27 @@ Deno.serve(async (request: Request) => {
     const serviceClient = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
+    const isRegeneration = Boolean(variantQuestionId)
+    const reservationRpc = isRegeneration
+      ? 'reserve_variant_regeneration'
+      : 'reserve_variant_generation'
+    const reservationParameters = isRegeneration
+      ? {
+          p_actor_user_id: actorUserId,
+          p_target_question_id: variantQuestionId,
+          p_provider: provider,
+          p_model: model,
+          p_prompt_version: VARIANT_PROMPT_VERSION,
+        }
+      : {
+          p_actor_user_id: actorUserId,
+          p_base_question_id: baseQuestionId,
+          p_provider: provider,
+          p_model: model,
+          p_prompt_version: VARIANT_PROMPT_VERSION,
+        }
     const { data: reservationRows, error: reservationError } =
-      await serviceClient.rpc('reserve_variant_generation', {
-        p_actor_user_id: actorUserId,
-        p_base_question_id: requestBody.baseQuestionId,
-        p_provider: provider,
-        p_model: model,
-        p_prompt_version: VARIANT_PROMPT_VERSION,
-      })
+      await serviceClient.rpc(reservationRpc, reservationParameters)
 
     if (reservationError || !reservationRows?.[0]) {
       return jsonResponse(
@@ -165,10 +199,15 @@ Deno.serve(async (request: Request) => {
         options: reservation.options,
         correct_answer: reservation.correct_answer,
       },
+      existingVariants: reservation.existing_variants ?? [],
+      variantCount: isRegeneration ? 1 : 5,
     })
     const latencyMs = Date.now() - startedAt
+    const completionRpc = isRegeneration
+      ? 'complete_variant_regeneration'
+      : 'complete_variant_generation'
     const { data: completionRows, error: completionError } =
-      await serviceClient.rpc('complete_variant_generation', {
+      await serviceClient.rpc(completionRpc, {
         p_actor_user_id: actorUserId,
         p_run_id: runId,
         p_variants: providerResult.variants,
@@ -191,7 +230,10 @@ Deno.serve(async (request: Request) => {
         runId,
         quizId: completionRows[0].quiz_id,
         slotNumber: completionRows[0].slot_number,
-        variantsInserted: completionRows[0].variants_inserted,
+        variantsInserted: isRegeneration
+          ? 1
+          : completionRows[0].variants_inserted,
+        variantNumber: completionRows[0].variant_number ?? null,
       },
       200,
       corsHeaders

@@ -30,6 +30,19 @@ function buildGeneratedVariants() {
   }))
 }
 
+function buildRegeneratedVariant(variantNumber) {
+  return {
+    statement: `Variante regenerada UI ${variantNumber}`,
+    options: [
+      { id: 'A', text: `Correcta regenerada ${variantNumber}` },
+      { id: 'B', text: `Distractor B regenerado ${variantNumber}` },
+      { id: 'C', text: `Distractor C regenerado ${variantNumber}` },
+      { id: 'D', text: `Distractor D regenerado ${variantNumber}` },
+    ],
+    correct_answer: { selected_option: 'A' },
+  }
+}
+
 describe('editor y publicación de seis variantes', () => {
   beforeAll(async () => {
     context = await createLocalTestContext()
@@ -51,15 +64,26 @@ describe('editor y publicación de seis variantes', () => {
         return { data: null, error: new Error('Función inesperada') }
       }
 
+      const isRegeneration = Boolean(body.variantQuestionId)
       const reservation = await context.service.rpc(
-        'reserve_variant_generation',
-        {
-          p_actor_user_id: context.teacherId,
-          p_base_question_id: body.baseQuestionId,
-          p_provider: 'mock-ui',
-          p_model: 'deterministic-ui',
-          p_prompt_version: 'v1.1-ui-test',
-        }
+        isRegeneration
+          ? 'reserve_variant_regeneration'
+          : 'reserve_variant_generation',
+        isRegeneration
+          ? {
+              p_actor_user_id: context.teacherId,
+              p_target_question_id: body.variantQuestionId,
+              p_provider: 'mock-ui',
+              p_model: 'deterministic-ui',
+              p_prompt_version: 'v1.1-ui-test',
+            }
+          : {
+              p_actor_user_id: context.teacherId,
+              p_base_question_id: body.baseQuestionId,
+              p_provider: 'mock-ui',
+              p_model: 'deterministic-ui',
+              p_prompt_version: 'v1.1-ui-test',
+            }
       )
 
       if (reservation.error) {
@@ -67,11 +91,19 @@ describe('editor y publicación de seis variantes', () => {
       }
 
       const completion = await context.service.rpc(
-        'complete_variant_generation',
+        isRegeneration
+          ? 'complete_variant_regeneration'
+          : 'complete_variant_generation',
         {
           p_actor_user_id: context.teacherId,
           p_run_id: reservation.data[0].run_id,
-          p_variants: buildGeneratedVariants(),
+          p_variants: isRegeneration
+            ? [
+                buildRegeneratedVariant(
+                  reservation.data[0].target_variant_number
+                ),
+              ]
+            : buildGeneratedVariants(),
           p_input_tokens: 10,
           p_output_tokens: 20,
           p_latency_ms: 5,
@@ -128,6 +160,22 @@ describe('editor y publicación de seis variantes', () => {
       await screen.findByText('6/6 variantes preparadas')
     ).toBeInTheDocument()
     expect(invokeFunction).toHaveBeenCalledOnce()
+
+    const variantThreeCard = screen
+      .getByRole('heading', { name: 'Variante 3' })
+      .closest('article')
+
+    expect(variantThreeCard).not.toBeNull()
+    await user.click(
+      within(variantThreeCard).getByRole('button', {
+        name: 'Regenerar variante',
+      })
+    )
+
+    expect(
+      await screen.findByText('Variante regenerada UI 3')
+    ).toBeInTheDocument()
+    expect(invokeFunction).toHaveBeenCalledTimes(2)
 
     const variantHeading = screen.getByRole('heading', {
       name: 'Variante 2',

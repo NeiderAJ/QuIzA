@@ -44,6 +44,20 @@ describe('adaptador del proveedor de variantes', () => {
     expect(request.messages[1].content).toContain(baseQuestion.statement)
   })
 
+  it('solicita una sola variante y aporta las existentes al regenerar', () => {
+    const existingVariants = buildVariants().slice(0, 4)
+    const request = buildProviderRequest('modelo-prueba', baseQuestion, {
+      existingVariants,
+      variantCount: 1,
+    })
+    const schema = request.response_format.json_schema.schema
+    const userPayload = JSON.parse(request.messages[1].content)
+
+    expect(schema.properties.variants.minItems).toBe(1)
+    expect(schema.properties.variants.maxItems).toBe(1)
+    expect(userPayload.existing_variants).toEqual(existingVariants)
+  })
+
   it('devuelve variantes y métricas sin transformar contenido académico', () => {
     const variants = buildVariants()
     const result = parseProviderResponse(
@@ -69,6 +83,16 @@ describe('adaptador del proveedor de variantes', () => {
         buildProviderPayload(JSON.stringify({ variants: buildVariants().slice(1) }))
       )
     ).toThrowError(expect.objectContaining({ code: 'invalid_variant_count' }))
+  })
+
+  it('acepta exactamente una variante en modo regeneración', () => {
+    const variant = buildVariants()[0]
+    const result = parseProviderResponse(
+      buildProviderPayload(JSON.stringify({ variants: [variant] })),
+      1
+    )
+
+    expect(result.variants).toEqual([variant])
   })
 
   it('no incorpora el cuerpo ni la clave en errores HTTP', async () => {

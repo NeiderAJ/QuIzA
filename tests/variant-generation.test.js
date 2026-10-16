@@ -43,6 +43,16 @@ async function failGeneration(runId, message = 'Fallo simulado') {
   })
 }
 
+async function reserveRegeneration(targetQuestionId) {
+  return context.service.rpc('reserve_variant_regeneration', {
+    p_actor_user_id: context.teacherId,
+    p_target_question_id: targetQuestionId,
+    p_provider: 'mock-local',
+    p_model: 'deterministic-v1',
+    p_prompt_version: 'v1.1-test',
+  })
+}
+
 describe('generación transaccional de variantes', () => {
   beforeAll(async () => {
     context = await createLocalTestContext()
@@ -90,6 +100,15 @@ describe('generación transaccional de variantes', () => {
     expect(questions.map(({ variant_number: number }) => number)).toEqual([
       1, 2, 3, 4, 5, 6,
     ])
+
+    const { data: deletedQuiz, error: deleteError } = await context.teacher
+      .from('quizzes')
+      .delete()
+      .eq('id', fixture.quizId)
+      .select('id')
+
+    expect(deleteError).toBeNull()
+    expect(deletedQuiz).toEqual([{ id: fixture.quizId }])
   })
 
   it('rechaza salida incompleta sin insertar variantes parciales', async () => {
@@ -263,5 +282,113 @@ describe('generación transaccional de variantes', () => {
     expect(reservation.error.message).toContain(
       'No tienes permiso para generar variantes'
     )
+  })
+
+  it('regenera únicamente la variante seleccionada', async () => {
+    const fixture = await createQuizWithVariants(context)
+    const target = fixture.questions.find(
+      ({ variant_number: variantNumber }) => variantNumber === 2
+    )
+    const { data: before, error: beforeError } = await context.service
+      .from('questions')
+      .select('id, variant_number, statement')
+      .eq('quiz_id', fixture.quizId)
+      .order('variant_number')
+
+    expect(beforeError).toBeNull()
+
+    const reservation = await reserveRegeneration(target.id)
+
+    expect(reservation.error).toBeNull()
+    expect(reservation.data?.[0]).toMatchObject({
+      target_variant_number: 2,
+      slot_number: 1,
+    })
+    expect(reservation.data[0].existing_variants).toHaveLength(5)
+
+    const regenerated = buildGeneratedVariants('single-regeneration')[0]
+    const completion = await context.service.rpc(
+      'complete_variant_regeneration',
+      {
+        p_actor_user_id: context.teacherId,
+        p_run_id: reservation.data[0].run_id,
+        p_variants: [regenerated],
+        p_input_tokens: 30,
+        p_output_tokens: 40,
+        p_latency_ms: 15,
+        p_result_metadata: { provider_status: 'success' },
+      }
+    )
+
+    expect(completion.error).toBeNull()
+    expect(completion.data?.[0]).toMatchObject({
+      variant_number: 2,
+      status: 'success',
+    })
+
+    const { data: after, error: afterError } = await context.service
+      .from('questions')
+      .select('id, variant_number, statement')
+      .eq('quiz_id', fixture.quizId)
+      .order('variant_number')
+
+    expect(afterError).toBeNull()
+    expect(after).toHaveLength(6)
+    expect(after.find(({ variant_number: number }) => number === 2)).toEqual({
+      id: target.id,
+      variant_number: 2,
+      statement: regenerated.statement,
+    })
+    expect(
+      after.filter(({ variant_number: number }) => number !== 2)
+    ).toEqual(before.filter(({ variant_number: number }) => number !== 2))
+  })
+
+  it('rechaza una regeneración duplicada y conserva la variante original', async () => {
+    const fixture = await createQuizWithVariants(context)
+    const target = fixture.questions.find(
+      ({ variant_number: variantNumber }) => variantNumber === 3
+    )
+    const { data: existingVariant, error: existingError } =
+      await context.service
+        .from('questions')
+        .select('statement, options, correct_answer')
+        .eq('quiz_id', fixture.quizId)
+        .eq('variant_number', 2)
+        .single()
+
+    expect(existingError).toBeNull()
+
+    const reservation = await reserveRegeneration(target.id)
+
+    expect(reservation.error).toBeNull()
+
+    const completion = await context.service.rpc(
+      'complete_variant_regeneration',
+      {
+        p_actor_user_id: context.teacherId,
+        p_run_id: reservation.data[0].run_id,
+        p_variants: [existingVariant],
+        p_input_tokens: null,
+        p_output_tokens: null,
+        p_latency_ms: 10,
+        p_result_metadata: null,
+      }
+    )
+
+    expect(completion.error).not.toBeNull()
+    expect(completion.error.message).toContain(
+      'duplica otra variante del slot'
+    )
+
+    const { data: preserved, error: preservedError } = await context.service
+      .from('questions')
+      .select('statement')
+      .eq('id', target.id)
+      .single()
+
+    expect(preservedError).toBeNull()
+    expect(preserved.statement).toBe('Pregunta de prueba 1, variante 3')
+    await failGeneration(reservation.data[0].run_id)
   })
 })

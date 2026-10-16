@@ -1013,7 +1013,7 @@ useEffect(() => {
     setBaseQuestionsMessage(`Pregunta ${slotNumber} guardada correctamente.`)
   }
 
-  async function handleGenerateVariants(baseQuestion) {
+  async function handleGenerateVariants(question, regenerate = false) {
     const quizIdOriginal = selectedQuiz?.id
 
     if (
@@ -1032,19 +1032,23 @@ useEffect(() => {
 
     const operation = {
       quizId: quizIdOriginal,
-      questionId: baseQuestion.id,
+      questionId: question.id,
     }
 
     questionOperationRef.current = operation
-    setGeneratingQuestionId(baseQuestion.id)
+    setGeneratingQuestionId(question.id)
     setBaseQuestionsMessage(
-      `Generando cinco variantes para la pregunta ${baseQuestion.slot_number}...`
+      regenerate
+        ? `Regenerando la variante ${question.variant_number} de la pregunta ${question.slot_number}...`
+        : `Generando cinco variantes para la pregunta ${question.slot_number}...`
     )
 
     const { error } = await supabase.functions.invoke(
       'generate-quiz-variants',
       {
-        body: { baseQuestionId: baseQuestion.id },
+        body: regenerate
+          ? { variantQuestionId: question.id }
+          : { baseQuestionId: question.id },
       }
     )
 
@@ -1085,7 +1089,9 @@ useEffect(() => {
     }
 
     setBaseQuestionsMessage(
-      `Variantes de la pregunta ${baseQuestion.slot_number} listas para revisar.`
+      regenerate
+        ? `Variante ${question.variant_number} de la pregunta ${question.slot_number} regenerada y lista para revisar.`
+        : `Variantes de la pregunta ${question.slot_number} listas para revisar.`
     )
   }
 
@@ -3536,19 +3542,42 @@ function renderAuthenticatedHeader() {
                                       )}
 
                                     {isSelectedEvaluationEditable && (
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          handleStartQuestionEdit(question)
-                                        }
-                                        disabled={
-                                          generatingQuestionId !== null ||
-                                          savingQuestionId !== null ||
-                                          publishingQuiz
-                                        }
-                                      >
-                                        Editar variante
-                                      </button>
+                                      <div className="question-variant-actions">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleStartQuestionEdit(question)
+                                          }
+                                          disabled={
+                                            generatingQuestionId !== null ||
+                                            savingQuestionId !== null ||
+                                            publishingQuiz
+                                          }
+                                        >
+                                          Editar variante
+                                        </button>
+
+                                        {question.variant_number > 1 && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleGenerateVariants(
+                                                question,
+                                                true
+                                              )
+                                            }
+                                            disabled={
+                                              generatingQuestionId !== null ||
+                                              savingQuestionId !== null ||
+                                              publishingQuiz
+                                            }
+                                          >
+                                            {generatingQuestionId === question.id
+                                              ? 'Regenerando...'
+                                              : 'Regenerar variante'}
+                                          </button>
+                                        )}
+                                      </div>
                                     )}
                                   </>
                                 )}
