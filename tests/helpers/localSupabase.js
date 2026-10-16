@@ -161,8 +161,37 @@ export async function createLocalTestContext() {
     student,
     teacherId,
     studentId,
+    studentEmail,
+    password,
     courseId: course.id,
     sessionId: jwtPayload.session_id,
+  }
+}
+
+export async function createAdditionalStudentSession(context) {
+  const student = createClient(context.url, context.anonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  })
+
+  const { data, error } = await student.auth.signInWithPassword({
+    email: context.studentEmail,
+    password: context.password,
+  })
+
+  assertSuccess(error, 'Autenticar segunda sesión del estudiante')
+
+  const sessionId = decodeJwtPayload(data.session.access_token).session_id
+
+  if (!sessionId || sessionId === context.sessionId) {
+    throw new Error('Supabase no creó una segunda sesión independiente.')
+  }
+
+  return {
+    student,
+    sessionId,
   }
 }
 
