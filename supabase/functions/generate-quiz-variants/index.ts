@@ -263,7 +263,11 @@ Deno.serve(async (request: Request) => {
           p_error_message: safeMessage,
           p_latency_ms: latencyMs,
           p_result_metadata: {
-            provider_status: 'error',
+            provider_status:
+              error instanceof ProviderGenerationError &&
+              error.providerStatus !== null
+                ? `http_${error.providerStatus}`
+                : 'error',
             error_code: errorCode,
           },
         })
