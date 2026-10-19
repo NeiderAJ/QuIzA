@@ -218,8 +218,40 @@ export async function generateVariantsWithProvider({
     })
 
     if (!response.ok) {
+      // Store only validated, short diagnostic fields, never the raw provider
+      // response, API credentials, request prompt, or student information.
+      let providerDetail = ''
+
+      try {
+        const payload = await response.json() as {
+          error?: { status?: unknown; message?: unknown }
+        }
+        const providerStatus = payload?.error?.status
+        const providerMessage = payload?.error?.message
+        const safeStatus =
+          typeof providerStatus === 'string' &&
+          /^[A-Z_]{2,40}$/.test(providerStatus)
+            ? providerStatus
+            : null
+
+        const safeMessage =
+          typeof providerMessage === 'string' &&
+          providerMessage.length <= 240 &&
+          /^[\p{L}\p{N}\s.,;:()'"\/_-]+$/u.test(providerMessage) &&
+          !/(api[_ -]?key|authorization|bearer|token|secret|credential|password|sk-[a-z0-9]|AIza[a-z0-9_-]{20,}|@)/i.test(providerMessage) &&
+          !providerMessage.includes(apiKey) &&
+          !(baseQuestion.statement.length >= 12 &&
+            providerMessage.toLowerCase().includes(baseQuestion.statement.trim().toLowerCase()))
+            ? providerMessage.replace(/\s+/g, ' ').trim()
+            : null
+
+        providerDetail = [safeStatus, safeMessage].filter(Boolean).join(': ')
+      } catch {
+        // Keep the HTTP status when the upstream error is not valid JSON.
+      }
+
       throw new ProviderGenerationError(
-        'El proveedor rechazó la solicitud de generación.',
+        `El proveedor rechazó la generación (HTTP ${response.status}${providerDetail ? ': ' + providerDetail : ''}).`,
         'provider_http_error',
         response.status
       )
